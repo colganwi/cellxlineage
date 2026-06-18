@@ -1,16 +1,13 @@
 import React from "react";
-import icon from "../../images/icon.png";
+import logo from "../../images/logo.png";
 
-const Logo = (props) => {
-  const { size } = props;
-  return (
-    <img
-      src={icon}
-      height={size}
-      width={size}
-      alt="CELLxGENE Annotate Logo"
-     />
-  );
-};
+const Logo = ({ height = 32 }) => (
+  <img
+    src={logo}
+    height={height}
+    style={{ width: "auto" }}
+    alt="cellxlineage logo"
+  />
+);
 
 export default Logo;

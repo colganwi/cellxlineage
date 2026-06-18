@@ -1,4 +1,4 @@
-# cellxlineage
+<img src="./docs/logo.png" width="300">
 
 _An interactive explorer for single-cell transcriptomics data with lineage tree visualization._
 
