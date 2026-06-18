@@ -7,6 +7,7 @@ from http import HTTPStatus
 
 class MatrixDataType(Enum):
     H5AD = "h5ad"
+    H5TD = "h5td"
     UNKNOWN = "unknown"
 
 
@@ -34,9 +35,16 @@ class MatrixDataLoader(object):
 
             self.matrix_type = AnndataAdaptor
 
+        elif self.matrix_data_type == MatrixDataType.H5TD:
+            from server.data_treedata.treedata_adaptor import TreedataAdaptor
+
+            self.matrix_type = TreedataAdaptor
+
     def __matrix_data_type(self):
         if self.location.path.endswith(".h5ad"):
             return MatrixDataType.H5AD
+        elif self.location.path.endswith(".h5td"):
+            return MatrixDataType.H5TD
         else:
             return MatrixDataType.UNKNOWN
 
@@ -45,7 +53,7 @@ class MatrixDataLoader(object):
 
     def pre_load_validation(self):
         if self.matrix_data_type == MatrixDataType.UNKNOWN:
-            raise DatasetAccessError("Dataset does not have a recognized type: .h5ad")
+            raise DatasetAccessError("Dataset does not have a recognized type: .h5ad or .h5td")
         self.matrix_type.pre_load_validation(self.location)
 
     def file_size(self):
