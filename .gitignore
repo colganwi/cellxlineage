@@ -57,3 +57,6 @@ ignoreE2E*
 
 # annotate subcmd
 .models_cache
+
+# project-specific
+CLAUDE.md
