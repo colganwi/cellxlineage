@@ -113,7 +113,7 @@ class DataLocator:
         # do our best to create a file with the same.
         ext = os.path.splitext(self.path)
         suffix = None if ext[1] == "" else ext[1]
-        with tempfile.NamedTemporaryFile(prefix="cellxgene_", suffix=suffix, delete=False) as tmp:
+        with tempfile.NamedTemporaryFile(prefix="cellxlineage_", suffix=suffix, delete=False) as tmp:
             self.fs.download(self.uri_or_path, tmp.name)
             tmp.close()
             tmp_path = tmp.name

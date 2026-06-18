@@ -10,7 +10,7 @@ from server.common.utils.utils import sort_options
 
 @sort_options
 @click.command(
-    short_help="Preprocess data for use with cellxgene. " "Run `cellxgene prepare --help` for more information.",
+    short_help="Preprocess data for use with cellxgene. " "Run `cellxlineage prepare --help` for more information.",
     options_metavar="<options>",
 )
 @click.argument("data", nargs=1, metavar="<path to data file>", required=True)
@@ -81,7 +81,7 @@ def prepare(
     """
 
     # collect slow imports here to make CLI startup more responsive
-    click.echo("[cellxgene] Starting CLI...")
+    click.echo("[cellxlineage] Starting CLI...")
     try:
         import matplotlib
 
@@ -89,7 +89,7 @@ def prepare(
         import scanpy as sc
     except ImportError:
         raise click.ClickException(
-            "[cellxgene] cellxgene prepare has not been installed. Please run `pip install 'cellxgene[prepare]'` "
+            "[cellxlineage] cellxlineage prepare has not been installed. Please run `pip install 'cellxlineage[prepare]'` "
             "to install the necessary requirements."
         )
 
@@ -105,7 +105,7 @@ def prepare(
 
     if not output:
         click.echo(
-            "Warning: No file will be saved, to save the results of cellxgene prepare include "
+            "Warning: No file will be saved, to save the results of cellxlineage prepare include "
             "--output <filename> to save output to a new file"
         )
     if isfile(output) and not overwrite:
@@ -214,20 +214,20 @@ def prepare(
 
     steps = [calculate_qc_metrics, make_sparse, run_recipe, run_pca, run_neighbors, run_louvain, run_embedding]
 
-    click.echo(f"[cellxgene] Loading data from {data}, please wait...")
+    click.echo(f"[cellxlineage] Loading data from {data}, please wait...")
     adata = load_data(data)
 
-    click.echo("[cellxgene] Beginning preprocessing...")
-    with click.progressbar(steps, label="[cellxgene] Progress", show_eta=False, item_show_func=show_step) as bar:
+    click.echo("[cellxlineage] Beginning preprocessing...")
+    with click.progressbar(steps, label="[cellxlineage] Progress", show_eta=False, item_show_func=show_step) as bar:
         for step in bar:
             step(adata)
 
     # saving
     if not output == "":
-        click.echo(f"[cellxgene] Saving results to {output}...")
+        click.echo(f"[cellxlineage] Saving results to {output}...")
         adata.write(output)
 
-    click.echo("[cellxgene] Success!")
+    click.echo("[cellxlineage] Success!")
 
 
 # TODO (mweiden): remove this once this issue is resolved https://github.com/theislab/anndata/issues/344

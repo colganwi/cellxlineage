@@ -94,7 +94,7 @@ class StrictJSONEncoder(json.JSONEncoder):
 
 
 def custom_format_warning(msg, *args, **kwargs):
-    return f"[cellxgene] Warning: {msg} \n"
+    return f"[cellxlineage] Warning: {msg} \n"
 
 
 def jsonify_strict(data):

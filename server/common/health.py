@@ -1,7 +1,7 @@
 from http import HTTPStatus
 from flask import make_response, jsonify
 
-from server import __version__ as cellxgene_version
+from server import __version__ as cellxlineage_version
 from server.common.utils.data_locator import DataLocator
 
 
@@ -21,7 +21,7 @@ def health_check(config):
     simple health check - return HTTP response.
     See https://tools.ietf.org/id/draft-inadarei-api-health-check-01.html
     """
-    health = {"status": None, "version": "1", "releaseID": cellxgene_version}
+    health = {"status": None, "version": "1", "releaseID": cellxlineage_version}
 
     server_config = config.server_config
     check = _is_accessible(server_config.single_dataset__datapath, server_config)

@@ -9,7 +9,7 @@ import pandas as pd
 from flask import session
 from fsspec import AbstractFileSystem
 
-from server import __version__ as cellxgene_version
+from server import __version__ as cellxlineage_version
 from server.app.session import get_user_id
 from server.common.annotations.annotations import Annotations
 from server.common.genesets import read_gene_sets_tidycsv
@@ -95,7 +95,7 @@ class AnnotationsLocalFile(Annotations):
             lastmodstr = "'unknown'" if lastmod is None else lastmod.isoformat(timespec="seconds")
             header = (
                 f"# Annotations generated on {datetime.now().isoformat(timespec='seconds')} "
-                f"using cellxgene version {cellxgene_version}\n"
+                f"using cellxlineage version {cellxlineage_version}\n"
                 f"# Input data file was {data_adaptor.get_location()}, "
                 f"which was last modified on {lastmodstr}\n"
             )
@@ -162,7 +162,7 @@ class AnnotationsLocalFile(Annotations):
             lastmodstr = "'unknown'" if lastmod is None else lastmod.isoformat(timespec="seconds")
             header = (
                 f"# Gene set generated on {datetime.now().isoformat(timespec='seconds')} "
-                f"using cellxgene version {cellxgene_version}\n"
+                f"using cellxlineage version {cellxlineage_version}\n"
                 f"# Input data file was {data_adaptor.get_location()}, "
                 f"which was last modified on {lastmodstr}\n"
             )

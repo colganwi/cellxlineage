@@ -297,7 +297,7 @@ class CliLaunchServer(Server):
 
 @sort_options
 @click.command(
-    short_help="Launch the cellxgene data viewer. " "Run `cellxgene launch --help` for more information.",
+    short_help="Launch the cellxgene data viewer. " "Run `cellxlineage launch --help` for more information.",
     options_metavar="<options>",
 )
 @launch_args
@@ -336,18 +336,18 @@ def launch(
 
     Examples:
 
-    > cellxgene launch example-dataset/pbmc3k.h5ad --title pbmc3k
+    > cellxlineage launch example-dataset/pbmc3k.h5ad --title pbmc3k
 
-    > cellxgene launch <your data file> --title <your title>
+    > cellxlineage launch <your data file> --title <your title>
 
-    > cellxgene launch <url>"""
+    > cellxlineage launch <url>"""
 
     if dump_default_config:
         print(default_config)
         sys.exit(0)
 
     # Startup message
-    click.echo("[cellxgene] Starting the CLI...")
+    click.echo("[cellxlineage] Starting the CLI...")
 
     # app config
     app_config = AppConfig()
@@ -401,7 +401,7 @@ def launch(
         #  any info messages will be passed to the messagefn function.
 
         def messagefn(message):
-            click.echo("[cellxgene] " + message)
+            click.echo("[cellxlineage] " + message)
 
         # Use a default secret if one is not provided
         if not server_config.app__flask_secret_key:
@@ -421,14 +421,14 @@ def launch(
         log = logging.getLogger("werkzeug")
         log.setLevel(logging.ERROR)
 
-    cellxgene_url = f"http://{app_config.server_config.app__host}:{app_config.server_config.app__port}"
+    cellxlineage_url = f"http://{app_config.server_config.app__host}:{app_config.server_config.app__port}"
     if server_config.app__open_browser:
-        click.echo(f"[cellxgene] Launching! Opening your browser to {cellxgene_url} now.")
-        webbrowser.open(cellxgene_url)
+        click.echo(f"[cellxlineage] Launching! Opening your browser to {cellxlineage_url} now.")
+        webbrowser.open(cellxlineage_url)
     else:
-        click.echo(f"[cellxgene] Launching! Please go to {cellxgene_url} in your browser.")
+        click.echo(f"[cellxlineage] Launching! Please go to {cellxlineage_url} in your browser.")
 
-    click.echo("[cellxgene] Type CTRL-C at any time to exit.")
+    click.echo("[cellxlineage] Type CTRL-C at any time to exit.")
 
     if not server_config.app__verbose:
         f = open(os.devnull, "w")

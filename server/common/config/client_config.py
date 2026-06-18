@@ -1,4 +1,4 @@
-from server import display_version as cellxgene_display_version
+from server import display_version as cellxlineage_display_version
 
 
 def get_client_config(app_config, data_adaptor):
@@ -25,7 +25,7 @@ def get_client_config(app_config, data_adaptor):
     # library_versions
     library_versions = {}
     library_versions.update(data_adaptor.get_library_versions())
-    library_versions["cellxgene"] = cellxgene_display_version
+    library_versions["cellxlineage"] = cellxlineage_display_version
 
     # links
     links = {"about-dataset": about}

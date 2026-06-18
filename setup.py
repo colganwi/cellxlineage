@@ -13,14 +13,14 @@ with open("server/requirements-annotate.txt") as fh:
     requirements_annotate = fh.read().splitlines()
 
 setup(
-    name="cellxgene",
+    name="cellxlineage",
     version="1.3.0",
     packages=find_packages(),
-    url="https://github.com/chanzuckerberg/cellxgene",
+    url="https://github.com/colganwi/cellxlineage",
     license="MIT",
-    author="Chan Zuckerberg Initiative",
-    author_email="cellxgene@chanzuckerberg.com",
-    description="Web application for exploration of large scale scRNA-seq datasets",
+    author="William Colgan",
+    author_email="wcolgan@wi.mit.edu",
+    description="Web application for exploration of single-cell datasets with lineage tree visualization",
     long_description=long_description,
     long_description_content_type="text/markdown",
     install_requires=requirements,
@@ -43,6 +43,6 @@ setup(
         "Programming Language :: Python :: 3 :: Only",
         "Topic :: Scientific/Engineering :: Bio-Informatics",
     ],
-    entry_points={"console_scripts": ["cellxgene = server.cli.cli:cli"]},
+    entry_points={"console_scripts": ["cellxlineage = server.cli.cli:cli"]},
     extras_require=dict(prepare=requirements_prepare, annotate=requirements_annotate),
 )
