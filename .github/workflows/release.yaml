@@ -1,0 +1,43 @@
+name: Release
+
+on:
+  release:
+    types: [published]
+
+# Use "trusted publishing", see https://docs.pypi.org/trusted-publishers/
+jobs:
+  release:
+    name: Upload release to PyPI
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/cellxlineage
+    permissions:
+      id-token: write # IMPORTANT: this permission is mandatory for trusted publishing
+    steps:
+      # cellxlineage ships a pre-built JS client inside the Python package, so
+      # the release is always cut from the lineage branch (not main).
+      - uses: actions/checkout@v4
+        with:
+          ref: lineage
+          fetch-depth: 0
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18.17.0
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install build tooling
+        # cpio is used by `make build` to assemble the server tree; jq is
+        # preinstalled on GitHub runners and required by the project Makefiles.
+        run: |
+          sudo apt-get update && sudo apt-get install -y cpio
+          python -m pip install --upgrade pip build
+      - name: Build client and assemble the package tree
+        run: make build
+      - name: Build sdist and wheel
+        run: cd build && python -m build --outdir ../dist
+      - name: Publish package distributions to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1

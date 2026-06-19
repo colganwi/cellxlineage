@@ -36,7 +36,7 @@ build: clean build-client
 	git ls-files server/ | cpio -pdm $(BUILDDIR)
 	cp -r client/build/  $(CLIENTBUILD)
 	$(call copy_client_assets,$(CLIENTBUILD),$(SERVERBUILD))
-	cp MANIFEST.in README.md setup.cfg setup.py $(BUILDDIR)
+	cp MANIFEST.in README.md setup.cfg setup.py pyproject.toml $(BUILDDIR)
 
 # If you are actively developing in the server folder use this, dirties the source tree
 .PHONY: build-for-server-dev
