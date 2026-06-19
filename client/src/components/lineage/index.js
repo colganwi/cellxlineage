@@ -22,8 +22,9 @@ const DIM_ALPHA = 0.15; // opacity of unselected cells in the annotation bar
 const MISSING_COLOR = [0.83, 0.83, 0.83]; // nodes/leaves with no obs mapping
 const BRANCH_COLOR = [0.25, 0.25, 0.25, 1];
 const MARGIN = { left: 6, right: 6, top: 6, bottom: 6 };
-const STRIP_WIDTH = 14; // annotation bar width, px
+const STRIP_WIDTH = 21; // annotation bar width, px
 const STRIP_GAP = 6; // gap between tree and bar, px
+const HIGHLIGHT_SCALE = 2; // hovered-category leaves widen by this factor
 
 function createProjectionTF(viewportWidth, viewportHeight) {
   const m = mat3.create();
@@ -37,6 +38,7 @@ function createProjectionTF(viewportWidth, viewportHeight) {
   genesets: state.genesets.genesets,
   lineageData: state.lineageData,
   lineageChoice: state.lineageChoice,
+  pointDilation: state.pointDilation,
   graphInteractionMode: state.controls.graphInteractionMode,
 }))
 class Lineage extends React.PureComponent {
@@ -58,6 +60,7 @@ class Lineage extends React.PureComponent {
     const leafYBuffer = regl.buffer();
     const leafColorBuffer = regl.buffer();
     const leafSelectedBuffer = regl.buffer();
+    const leafHighlightBuffer = regl.buffer();
     const nodeBuffer = regl.buffer();
     const nodeColorBuffer = regl.buffer();
     const nodeSelectedBuffer = regl.buffer();
@@ -72,6 +75,7 @@ class Lineage extends React.PureComponent {
       leafYBuffer,
       leafColorBuffer,
       leafSelectedBuffer,
+      leafHighlightBuffer,
       nodeBuffer,
       nodeColorBuffer,
       nodeSelectedBuffer,
@@ -149,6 +153,19 @@ class Lineage extends React.PureComponent {
     return selected;
   });
 
+  /* per-item highlight flag: 1 when the leaf's cell is in the hovered category
+     (mirrors the UMAP point-dilation highlight in the left sidebar) */
+  computeHighlight = memoize((dilationData, label, obsIdx) => {
+    const highlight = new Float32Array(obsIdx.length);
+    if (dilationData) {
+      for (let i = 0, n = obsIdx.length; i < n; i += 1) {
+        const o = obsIdx[i];
+        if (o >= 0 && dilationData[o] === label) highlight[i] = 1;
+      }
+    }
+    return highlight;
+  });
+
   constructor(props) {
     super(props);
     this.reglCanvas = null;
@@ -191,8 +208,14 @@ class Lineage extends React.PureComponent {
   };
 
   fetchAsyncProps = async (props) => {
-    const { annoMatrix, colors, crossfilter, genesets, lineageData } =
-      props.watchProps;
+    const {
+      annoMatrix,
+      colors,
+      crossfilter,
+      genesets,
+      lineageData,
+      pointDilation,
+    } = props.watchProps;
     const data = lineageData?.data;
     if (!data) return { data: null };
 
@@ -213,6 +236,14 @@ class Lineage extends React.PureComponent {
     );
     const { rgb } = colorTable;
 
+    // Cell metadata column + value being hovered in the left sidebar, if any.
+    const { metadataField, categoryField } = pointDilation ?? {};
+    let dilationData = null;
+    if (metadataField) {
+      const df = await annoMatrix.fetch("obs", metadataField);
+      dilationData = df?.col(metadataField)?.asArray();
+    }
+
     const branchPositions = this.computeBranchPositions(data.branches);
     const extents = this.computeExtents(data.branches);
 
@@ -228,6 +259,11 @@ class Lineage extends React.PureComponent {
       nLeaves: leafObs.length,
       leafColors: this.computeColors(rgb, leafObs),
       leafSelected: this.computeSelected(crossfilter, leafObs),
+      leafHighlight: this.computeHighlight(
+        dilationData,
+        categoryField,
+        leafObs
+      ),
     };
 
     if (data.nodes) {
@@ -308,6 +344,7 @@ class Lineage extends React.PureComponent {
       leafYBuffer,
       leafColorBuffer,
       leafSelectedBuffer,
+      leafHighlightBuffer,
       nodeBuffer,
       nodeColorBuffer,
       nodeSelectedBuffer,
@@ -316,6 +353,7 @@ class Lineage extends React.PureComponent {
     leafYBuffer({ data: asyncProps.leafY, dimension: 1 });
     leafColorBuffer({ data: asyncProps.leafColors, dimension: 3 });
     leafSelectedBuffer({ data: asyncProps.leafSelected, dimension: 1 });
+    leafHighlightBuffer({ data: asyncProps.leafHighlight, dimension: 1 });
     if (asyncProps.hasNodes) {
       nodeBuffer({ data: asyncProps.nodePositions, dimension: 2 });
       nodeColorBuffer({ data: asyncProps.nodeColors, dimension: 3 });
@@ -335,6 +373,7 @@ class Lineage extends React.PureComponent {
       leafYBuffer,
       leafColorBuffer,
       leafSelectedBuffer,
+      leafHighlightBuffer,
       nodeBuffer,
       nodeColorBuffer,
       nodeSelectedBuffer,
@@ -356,8 +395,11 @@ class Lineage extends React.PureComponent {
 
     const stripWidthPx = cache.hasNodes ? 0 : STRIP_WIDTH;
     const gapPx = cache.hasNodes ? 0 : STRIP_GAP;
+    // Reserve whitespace to the right of the bar so hovered-category leaves can
+    // widen (HIGHLIGHT_SCALE×) without spilling off the canvas.
+    const growRoomPx = cache.hasNodes ? 0 : STRIP_WIDTH * (HIGHLIGHT_SCALE - 1);
     const treeLeft = MARGIN.left;
-    const treeRight = width - MARGIN.right - gapPx - stripWidthPx;
+    const treeRight = width - MARGIN.right - growRoomPx - gapPx - stripWidthPx;
     const xM = (treeRight - treeLeft) / (xMax - xMin);
     const xB = treeLeft - xM * xMin;
     const yTop = MARGIN.top;
@@ -410,6 +452,7 @@ class Lineage extends React.PureComponent {
         leafY: leafYBuffer,
         color: leafColorBuffer,
         selected: leafSelectedBuffer,
+        highlighted: leafHighlightBuffer,
         instances: cache.nLeaves,
         projection,
         stripX0: treeRight + gapPx,
@@ -418,6 +461,7 @@ class Lineage extends React.PureComponent {
         yB,
         cellHalf,
         dimAlpha: DIM_ALPHA,
+        highlightScale: HIGHLIGHT_SCALE,
         scissorBox,
       });
     }
@@ -433,6 +477,7 @@ class Lineage extends React.PureComponent {
       genesets,
       lineageData,
       lineageChoice,
+      pointDilation,
       graphInteractionMode,
     } = this.props;
     const { regl } = this.state;
@@ -484,6 +529,7 @@ class Lineage extends React.PureComponent {
               crossfilter,
               genesets,
               lineageData,
+              pointDilation,
             }}
           >
             <Async.Fulfilled>
