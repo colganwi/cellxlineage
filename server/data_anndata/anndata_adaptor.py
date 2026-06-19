@@ -301,6 +301,27 @@ class AnndataAdaptor(DataAdaptor):
             df = df[fields]
         return encode_matrix_fbs(df, col_idx=df.columns)
 
+    @staticmethod
+    def _is_bare_embedding_key(key):
+        """obsm keys that are valid embeddings without the cellxgene "X_" prefix.
+
+        Spatial coordinates are conventionally stored without the prefix (e.g.
+        scanpy/squidpy use obsm["spatial"], obsm["spatial_fov"], ...), so any
+        obsm key whose name contains "spatial" is treated as an embedding."""
+        return isinstance(key, str) and "spatial" in key.lower()
+
+    def _obsm_key_for_embedding(self, ename):
+        """Resolve an embedding name to its obsm key, or None if absent.
+
+        Prefer the cellxgene convention obsm["X_<name>"]; fall back to a bare
+        obsm["<name>"] for recognized prefix-less conventions (e.g. spatial)."""
+        prefixed = f"X_{ename}"
+        if prefixed in self.data.obsm:
+            return prefixed
+        if self._is_bare_embedding_key(ename) and ename in self.data.obsm:
+            return ename
+        return None
+
     def get_embedding_names(self):
         """
         Return pre-computed embeddings.
@@ -314,16 +335,26 @@ class AnndataAdaptor(DataAdaptor):
         layouts = self.dataset_config.embeddings__names
 
         if layouts is None or len(layouts) == 0:
-            layouts = [key[2:] for key in list(self.data.obsm.keys()) if type(key) is str and key.startswith("X_")]
+            layouts = []
+            for key in list(self.data.obsm.keys()):
+                if type(key) is not str:
+                    continue
+                if key.startswith("X_"):
+                    name = key[2:]
+                elif self._is_bare_embedding_key(key):
+                    name = key
+                else:
+                    continue
+                if name not in layouts:
+                    layouts.append(name)
 
         # remove invalid layouts
         valid_layouts = []
-        obsm_keys = list(self.data.obsm.keys())
         for layout in layouts:
-            layout_name = f"X_{layout}"
-            if layout_name not in obsm_keys:
+            obsm_key = self._obsm_key_for_embedding(layout)
+            if obsm_key is None:
                 warnings.warn(f"Ignoring unknown layout name: {layout}.")
-            elif not self._is_valid_layout(self.data.obsm[layout_name]):
+            elif not self._is_valid_layout(self.data.obsm[obsm_key]):
                 warnings.warn(f"Ignoring layout due to malformed shape or data type: {layout}")
             else:
                 valid_layouts.append(layout)
@@ -335,7 +366,10 @@ class AnndataAdaptor(DataAdaptor):
         return valid_layouts[0:MAX_LAYOUTS]
 
     def get_embedding_array(self, ename, dims=2):
-        full_embedding = self.data.obsm[f"X_{ename}"]
+        obsm_key = self._obsm_key_for_embedding(ename)
+        if obsm_key is None:
+            raise KeyError(f"Unknown embedding: {ename}")
+        full_embedding = self.data.obsm[obsm_key]
         return full_embedding[:, 0:dims]
 
     def compute_diffexp_ttest(self, maskA, maskB, top_n=None, lfc_cutoff=None):
