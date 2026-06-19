@@ -167,6 +167,20 @@ class LayoutObsAPI(Resource):
         return common_rest.layout_obs_get(request, data_adaptor)
 
 
+class LineageMetaAPI(Resource):
+    @cache_control(public=True, max_age=ONE_WEEK)
+    @rest_get_data_adaptor
+    def get(self, data_adaptor):
+        return common_rest.lineage_meta_get(data_adaptor)
+
+
+class LineageObsAPI(Resource):
+    @cache_control(public=True, max_age=ONE_WEEK)
+    @rest_get_data_adaptor
+    def get(self, data_adaptor):
+        return common_rest.lineage_obs_get(request, data_adaptor)
+
+
 class GenesetsAPI(Resource):
     @cache_control(public=True, max_age=ONE_WEEK)
     @rest_get_data_adaptor
@@ -222,6 +236,8 @@ def get_api_dataroot_resources(bp_dataroot):
     # Computation routes
     add_resource(DiffExpObsAPI, "/diffexp/obs")
     add_resource(LayoutObsAPI, "/layout/obs")
+    add_resource(LineageMetaAPI, "/lineage/meta")
+    add_resource(LineageObsAPI, "/lineage/obs")
     return api
 
 

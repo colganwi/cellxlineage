@@ -1,5 +1,8 @@
 import { doBinaryRequest, doFetch } from "./fetchHelpers";
-import { matrixFBSToDataframe } from "../util/stateManager/matrix";
+import {
+  matrixFBSToDataframe,
+  decodeMatrixFBS,
+} from "../util/stateManager/matrix";
 import { _getColumnSchema } from "./schema";
 import {
   addObsAnnoColumn,
@@ -272,11 +275,53 @@ export default class AnnoMatrixLoader extends AnnoMatrix {
 
     return [whereCacheUpdate, result];
   }
+
+  /**
+   ** Lineage tree layout fetch.  Not part of the AnnoMatrix column cache — the
+   ** payload is graph-shaped (variable-length coordinate arrays), so it is
+   ** fetched directly and decoded into typed arrays for the tree panel.
+   **/
+  async fetchLineage(treeNames, depthKey) {
+    const params = [];
+    (treeNames ?? []).forEach((t) =>
+      params.push(`tree=${encodeURIComponent(t)}`)
+    );
+    if (depthKey) params.push(`depth-key=${encodeURIComponent(depthKey)}`);
+    const url = `${this.baseURL}lineage/obs?${params.join("&")}`;
+    const buffer = await doBinaryRequest(url);
+    return decodeLineageFBS(buffer);
+  }
 }
 
 /*
 Utility functions below
 */
+
+/* decode the framed lineage payload: [uint32 count]([uint32 len][matrix fbs])* */
+function decodeLineageFBS(arrayBuffer) {
+  const dv = new DataView(arrayBuffer);
+  const count = dv.getUint32(0, true);
+  let offset = 4;
+  const matrices = [];
+  for (let i = 0; i < count; i += 1) {
+    const len = dv.getUint32(offset, true);
+    offset += 4;
+    const sub = arrayBuffer.slice(offset, offset + len);
+    matrices.push(_decodedMatrixToObject(decodeMatrixFBS(sub)));
+    offset += len;
+  }
+  const [branches, leaves, nodes] = matrices;
+  return { branches, leaves, nodes: nodes ?? null };
+}
+
+/* map a decoded FBS matrix { columns, colIdx } to { colName: typedArray } */
+function _decodedMatrixToObject(decoded) {
+  const obj = {};
+  decoded.colIdx.forEach((name, i) => {
+    obj[name] = decoded.columns[i];
+  });
+  return obj;
+}
 
 function _writableCheck(colSchema) {
   if (!colSchema?.writable) {

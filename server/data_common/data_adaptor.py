@@ -7,7 +7,13 @@ from server_timing import Timing as ServerTiming
 
 from server.common.config.app_config import AppConfig
 from server.common.constants import Axis, XApproximateDistribution
-from server.common.errors import FilterError, JSONEncodingValueError, ExceedsLimitError, UnsupportedSummaryMethod
+from server.common.errors import (
+    FilterError,
+    JSONEncodingValueError,
+    ExceedsLimitError,
+    UnsupportedSummaryMethod,
+    PrepareError,
+)
 from server.common.utils.utils import jsonify_strict
 from server.common.fbs.matrix import encode_matrix_fbs
 from server.common.genesets import validate_gene_sets
@@ -398,6 +404,17 @@ class DataAdaptor(metaclass=ABCMeta):
         except RuntimeError:
             lastmod = None
         return lastmod
+
+    # Lineage trees are only present for TreeData (.h5td) datasets. Plain
+    # AnnData datasets report no trees so the client hides the tree panel.
+    def get_lineage_names(self):
+        return []
+
+    def get_lineage_meta(self):
+        return {"names": [], "depthKeys": [], "defaultTrees": [], "hasOverlap": False, "alignment": "leaves"}
+
+    def lineage_to_fbs_matrix(self, tree_names=None, depth_key="depth"):
+        raise PrepareError("Lineage trees are only available for TreeData (.h5td) datasets.")
 
     def summarize_var(self, method, filter, query_hash):
         if method != "mean":

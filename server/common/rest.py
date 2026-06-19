@@ -306,6 +306,35 @@ def layout_obs_get(request, data_adaptor):
         )
 
 
+def lineage_meta_get(data_adaptor):
+    return make_response(jsonify(data_adaptor.get_lineage_meta()), HTTPStatus.OK)
+
+
+def lineage_obs_get(request, data_adaptor):
+    tree_names = request.args.getlist("tree", None)
+    depth_key = request.args.get("depth-key", "depth")
+
+    preferred_mimetype = request.accept_mimetypes.best_match(["application/octet-stream"])
+    if preferred_mimetype != "application/octet-stream":
+        return abort(HTTPStatus.NOT_ACCEPTABLE)
+
+    try:
+        return make_response(
+            data_adaptor.lineage_to_fbs_matrix(tree_names, depth_key),
+            HTTPStatus.OK,
+            {"Content-Type": "application/octet-stream"},
+        )
+    except (KeyError, DatasetAccessError) as e:
+        return abort_and_log(HTTPStatus.BAD_REQUEST, str(e), include_exc_info=True)
+    except PrepareError:
+        return abort_and_log(
+            HTTPStatus.NOT_IMPLEMENTED,
+            f"No lineage trees available {request.path}",
+            loglevel=logging.ERROR,
+            include_exc_info=True,
+        )
+
+
 def genesets_get(request, data_adaptor):
     preferred_mimetype = request.accept_mimetypes.best_match(["application/json", "text/csv"])
     if preferred_mimetype not in ("application/json", "text/csv"):

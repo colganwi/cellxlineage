@@ -10,6 +10,7 @@ import * as selnActions from "./selection";
 import * as annoActions from "./annotation";
 import * as viewActions from "./viewStack";
 import * as embActions from "./embedding";
+import * as lineageActions from "./lineage";
 import * as genesetActions from "./geneset";
 
 function setGlobalConfig(config) {
@@ -109,6 +110,9 @@ const doInitialDataLoad = () =>
         obsCrossfilter,
       });
       dispatch({ type: "initial data load complete" });
+
+      // Load lineage trees for the right-sidebar panel (no-op for plain AnnData).
+      dispatch(lineageActions.lineageInitialLoad());
 
       const defaultEmbedding = config?.parameters?.default_embedding;
       const layoutSchema = schema?.schema?.layout?.obs ?? [];
@@ -268,6 +272,9 @@ export default {
   saveGenesetsAction: annoActions.saveGenesetsAction,
   needToSaveObsAnnotations: annoActions.needToSaveObsAnnotations,
   layoutChoiceAction: embActions.layoutChoiceAction,
+  lineageTreeChoiceAction: lineageActions.lineageTreeChoiceAction,
+  lineageDepthKeyChoiceAction: lineageActions.lineageDepthKeyChoiceAction,
+  lineageRectSelectAction: lineageActions.lineageRectSelectAction,
   setCellSetFromSelection: selnActions.setCellSetFromSelection,
   genesetDelete: genesetActions.genesetDelete,
   genesetAddGenes: genesetActions.genesetAddGenes,

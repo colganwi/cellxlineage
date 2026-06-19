@@ -1,16 +1,8 @@
 import React from "react";
-import * as globals from "../../globals";
+import Lineage from "../lineage";
 
 function RightSidebar() {
-  return (
-    <div
-      style={{
-        borderLeft: `1px solid ${globals.lightGrey}`,
-        height: "inherit",
-        width: "inherit",
-      }}
-    />
-  );
+  return <Lineage />;
 }
 
 export default RightSidebar;
