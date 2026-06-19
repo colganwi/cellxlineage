@@ -20,7 +20,10 @@ class ColorsTest(unittest.TestCase):
         self.assertEqual(
             convert_color_to_hex_format([0.9607843137254902, 0.8705882352941177, 0.7019607843137254]), "#f5deb3"
         )
-        for bad_input in ["foo", "BAR", "#AABB", "#AABBCCDD", "#AABBGG", (1, 2), [1, 2], (1, 2, 3, 4), [1, 2, 3, 4]]:
+        # hex triplet with an alpha byte (#RRGGBBAA) is accepted; alpha is dropped
+        self.assertEqual(convert_color_to_hex_format("#f5deb3ff"), "#f5deb3")
+        self.assertEqual(convert_color_to_hex_format("#AABBCCDD"), "#aabbcc")
+        for bad_input in ["foo", "BAR", "#AABB", "#AABBCCD", "#AABBGG", (1, 2), [1, 2], (1, 2, 3, 4), [1, 2, 3, 4]]:
             with self.assertRaises(ColorFormatException):
                 convert_color_to_hex_format(bad_input)
 

@@ -3,6 +3,10 @@ import re
 from server.common.errors import ColorFormatException
 
 HEX_COLOR_FORMAT = re.compile("^#[a-fA-F0-9]{6,6}$")
+# #RRGGBBAA — hex triplet with an alpha channel, as emitted by matplotlib/scanpy
+# (e.g. anndata uns "*_colors"). cellxgene colors are alpha-less, so the alpha
+# byte is dropped on conversion.
+HEX_COLOR_WITH_ALPHA_FORMAT = re.compile("^#[a-fA-F0-9]{8,8}$")
 
 # https://www.w3.org/TR/css-color-4/#named-colors
 CSS4_NAMED_COLORS = dict(
@@ -165,7 +169,9 @@ def convert_color_to_hex_format(unknown):
     - A CSS4 color name, as supported by matplotlib https://matplotlib.org/3.1.0/gallery/color/named_colors.html
     - RGB tuple/list with values ranging from 0.0 to 1.0, as in [0.5, 0.75, 1.0]
     - RFB tuple/list with values ranging from 0 to 255, as in [128, 192, 255]
-    - Hex triplet string, as in "#08c0ff"
+    - Hex triplet string, as in "#08c0ff", optionally with an alpha byte, as in "#08c0ff80"
+
+    A hex alpha byte is dropped, since cellxgene category colors are alpha-less hex triplets.
 
     :param unknown: color info of unknown format
     :return: a hex triplet representing that color
@@ -183,6 +189,9 @@ def convert_color_to_hex_format(unknown):
             return CSS4_NAMED_COLORS[unknown.lower()]
         elif isinstance(unknown, str) and HEX_COLOR_FORMAT.match(unknown):
             return unknown.lower()
+        elif isinstance(unknown, str) and HEX_COLOR_WITH_ALPHA_FORMAT.match(unknown):
+            # #RRGGBBAA -> #RRGGBB (drop the alpha byte).
+            return unknown[:7].lower()
         else:
             raise ColorFormatException("Unknown color format type!")
     except Exception as e:
