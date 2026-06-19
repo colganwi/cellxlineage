@@ -45,6 +45,9 @@ __pycache__
 data
 tags
 myconfig.yaml
+dev
+._*
+*.csv
 
 # Jekyll
 docs/_site/
@@ -60,3 +63,4 @@ ignoreE2E*
 
 # project-specific
 CLAUDE.md
+

@@ -178,7 +178,7 @@ def encode_matrix_fbs(matrix, row_idx=None, col_idx=None):
     matrix = serialize_matrix(builder, n_rows, n_cols, matrix_column_vec, cidx)
 
     builder.Finish(matrix)
-    return builder.Output()
+    return bytes(builder.Output())
 
 
 def deserialize_typed_array(tarr):

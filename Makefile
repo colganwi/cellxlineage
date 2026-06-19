@@ -46,6 +46,15 @@ build-for-server-dev: clean-server build-client copy-client-assets
 copy-client-assets:
 	$(call copy_client_assets,client/build,server)
 
+# Quick dev rebuild: webpack dev build + copy assets (no csp-hashes.json required)
+.PHONY: dev-build
+dev-build:
+	cd client && npm run dev
+	mkdir -p server/common/web/static/assets
+	mkdir -p server/common/web/templates/
+	cp client/build/index.html server/common/web/templates/
+	cp -r client/build/static server/common/web/
+
 
 # TESTING
 .PHONY: test
