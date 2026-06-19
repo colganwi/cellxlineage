@@ -413,7 +413,7 @@ class DataAdaptor(metaclass=ABCMeta):
     def get_lineage_meta(self):
         return {"names": [], "depthKeys": [], "defaultTrees": [], "hasOverlap": False, "alignment": "leaves"}
 
-    def lineage_to_fbs_matrix(self, tree_names=None, depth_key="depth"):
+    def lineage_to_fbs_matrix(self, tree_names=None, depth_key="depth", keep_obs=None):
         raise PrepareError("Lineage trees are only available for TreeData (.h5td) datasets.")
 
     def summarize_var(self, method, filter, query_hash):

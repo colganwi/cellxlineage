@@ -310,7 +310,7 @@ def lineage_meta_get(data_adaptor):
     return make_response(jsonify(data_adaptor.get_lineage_meta()), HTTPStatus.OK)
 
 
-def lineage_obs_get(request, data_adaptor):
+def _lineage_obs_response(request, data_adaptor, keep_obs):
     tree_names = request.args.getlist("tree", None)
     depth_key = request.args.get("depth-key", "depth")
 
@@ -320,7 +320,7 @@ def lineage_obs_get(request, data_adaptor):
 
     try:
         return make_response(
-            data_adaptor.lineage_to_fbs_matrix(tree_names, depth_key),
+            data_adaptor.lineage_to_fbs_matrix(tree_names, depth_key, keep_obs),
             HTTPStatus.OK,
             {"Content-Type": "application/octet-stream"},
         )
@@ -333,6 +333,19 @@ def lineage_obs_get(request, data_adaptor):
             loglevel=logging.ERROR,
             include_exc_info=True,
         )
+
+
+def lineage_obs_get(request, data_adaptor):
+    # No subset active → lay out the full trees.
+    return _lineage_obs_response(request, data_adaptor, keep_obs=None)
+
+
+def lineage_obs_put(request, data_adaptor):
+    # Subset active → the body carries the surviving obs row positions (in the
+    # client's view order) so the server can prune trees to the induced subtree.
+    body = request.get_json(silent=True) or {}
+    keep_obs = body.get("keepObs", None)
+    return _lineage_obs_response(request, data_adaptor, keep_obs=keep_obs)
 
 
 def genesets_get(request, data_adaptor):

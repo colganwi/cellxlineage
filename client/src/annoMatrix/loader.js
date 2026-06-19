@@ -281,14 +281,26 @@ export default class AnnoMatrixLoader extends AnnoMatrix {
    ** payload is graph-shaped (variable-length coordinate arrays), so it is
    ** fetched directly and decoded into typed arrays for the tree panel.
    **/
-  async fetchLineage(treeNames, depthKey) {
+  async fetchLineage(treeNames, depthKey, keepObs = null) {
     const params = [];
     (treeNames ?? []).forEach((t) =>
       params.push(`tree=${encodeURIComponent(t)}`)
     );
     if (depthKey) params.push(`depth-key=${encodeURIComponent(depthKey)}`);
     const url = `${this.baseURL}lineage/obs?${params.join("&")}`;
-    const buffer = await doBinaryRequest(url);
+    // keepObs is null when no subset is active (fetch full trees via GET).
+    // When a subset is active it lists the surviving obs row positions, sent
+    // in the body of a PUT so the server prunes to the induced subtree.
+    const init = {
+      headers: new Headers({ Accept: "application/octet-stream" }),
+    };
+    if (keepObs != null) {
+      init.method = "PUT";
+      init.headers.set("Content-Type", "application/json");
+      init.body = JSON.stringify({ keepObs: Array.from(keepObs) });
+    }
+    const res = await doFetch(url, init);
+    const buffer = await res.arrayBuffer();
     return decodeLineageFBS(buffer);
   }
 }

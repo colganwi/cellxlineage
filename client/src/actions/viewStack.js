@@ -17,6 +17,7 @@ import {
   _userSubsetAnnoMatrix,
   _userResetSubsetAnnoMatrix,
 } from "../util/stateManager/viewStackHelpers";
+import { lineageRefetchAction } from "./lineage";
 
 export const clipAction = (min, max) => (dispatch, getState) => {
   /*
@@ -54,6 +55,8 @@ export const subsetAction = () => (dispatch, getState) => {
     annoMatrix,
     obsCrossfilter,
   });
+  // Re-fetch the lineage layout so the tree panel shows the induced subtree.
+  dispatch(lineageRefetchAction());
 };
 
 export const resetSubsetAction = () => (dispatch, getState) => {
@@ -71,4 +74,6 @@ export const resetSubsetAction = () => (dispatch, getState) => {
     annoMatrix,
     obsCrossfilter,
   });
+  // Re-fetch the lineage layout so the tree panel returns to the full tree.
+  dispatch(lineageRefetchAction());
 };

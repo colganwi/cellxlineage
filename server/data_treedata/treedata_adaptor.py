@@ -1,5 +1,6 @@
 import importlib.metadata
 import struct
+from collections import deque
 
 import networkx as nx
 import numpy as np
@@ -140,6 +141,27 @@ class TreedataAdaptor(AnndataAdaptor):
         }
 
     @staticmethod
+    def _prune_tree(tree, keep_names):
+        """Induced subtree: the selected leaves plus all of their ancestors.
+
+        Mirrors treedata._utils.subset_tree for alignment='leaves' — start from
+        the kept nodes and walk predecessors up to the root, then take the
+        induced subgraph. Internal nodes left with a single child (unifurcations)
+        are retained, matching TreeData's behavior.
+        """
+        keep = {n for n in tree.nodes if n in keep_names}
+        queue = deque()
+        for node in keep:
+            queue.extend(tree.predecessors(node))
+        while queue:
+            node = queue.popleft()
+            if node in keep:
+                continue
+            keep.add(node)
+            queue.extend(tree.predecessors(node))
+        return tree.subgraph(keep)
+
+    @staticmethod
     def _tree_root(tree):
         node = next(iter(tree.nodes))
         while True:
@@ -195,6 +217,15 @@ class TreedataAdaptor(AnndataAdaptor):
         return node_coords, leaves
 
     @staticmethod
+    def _obs_indexer(names, obs_index, name_to_view):
+        """Resolve node/leaf names to obs row indices: full-index positions when
+        no subset is active, else positions within the subset (view) space.
+        Unmatched names (e.g. unselected ancestors) map to -1."""
+        if name_to_view is None:
+            return obs_index.get_indexer(names).astype(np.int32)
+        return np.asarray([name_to_view.get(n, -1) for n in names], dtype=np.int32)
+
+    @staticmethod
     def _frame_matrices(matrices):
         """Length-prefixed concatenation of FBS matrices: [count][len][bytes]..."""
         out = bytearray(struct.pack("<I", len(matrices)))
@@ -203,7 +234,7 @@ class TreedataAdaptor(AnndataAdaptor):
             out += m
         return bytes(out)
 
-    def lineage_to_fbs_matrix(self, tree_names=None, depth_key="depth"):
+    def lineage_to_fbs_matrix(self, tree_names=None, depth_key="depth", keep_obs=None):
         """Serialize tree layout as a framed sequence of FBS matrices.
 
         Matrix 0 "branches": one row per line segment, columns x0,y0,x1,y1.
@@ -212,16 +243,34 @@ class TreedataAdaptor(AnndataAdaptor):
         Matrix 1 "leaves": one row per leaf, columns y, obs (obs row index).
         Matrix 2 "nodes" (only when alignment != 'leaves'): internal nodes,
           columns x, y, obs — for coloring nodes instead of a leaf bar.
+
+        keep_obs (optional): obs row positions (in the full obs index, in the
+        client's view order) that survive an active subset. When given, each
+        tree is pruned to the induced subtree of those leaves, and the emitted
+        obs indices are positions within that subset (so they line up with the
+        client's subset color/selection arrays). When None, the full trees are
+        laid out and obs indices are positions in the full obs index.
         """
         depth_key = depth_key or "depth"
         trees = self._select_trees(tree_names)
         if len(trees) > 1 and bool(getattr(self.data, "has_overlap", False)):
             raise DatasetAccessError("Cannot lay out multiple trees when trees share observations; select one tree.")
 
-        node_coords, leaves = self._layout_trees(trees, depth_key)
-
         # Map node/leaf names → obs row position (leaf names match obs index).
         obs_index = self.get_obs_index()
+
+        # Active subset: prune trees to the selected leaves' induced subtree and
+        # emit obs indices in the subset's (view) coordinate space.
+        name_to_view = None
+        if keep_obs is not None:
+            keep_obs = np.asarray(keep_obs, dtype=np.int64)
+            keep_names = obs_index[keep_obs]
+            keep_set = set(keep_names)
+            name_to_view = {name: i for i, name in enumerate(keep_names)}
+            trees = {k: self._prune_tree(t, keep_set) for k, t in trees.items()}
+            trees = {k: t for k, t in trees.items() if t.number_of_nodes() > 0}
+
+        node_coords, leaves = self._layout_trees(trees, depth_key)
 
         # Branch segments.
         seg_x0, seg_y0, seg_x1, seg_y1 = [], [], [], []
@@ -245,7 +294,7 @@ class TreedataAdaptor(AnndataAdaptor):
         # Leaves: y position + obs row index.
         leaf_names = [node for (_key, node) in leaves]
         leaf_y = np.asarray([node_coords[leaf][1] for leaf in leaves], dtype=np.float32)
-        leaf_obs = obs_index.get_indexer(leaf_names).astype(np.int32)
+        leaf_obs = self._obs_indexer(leaf_names, obs_index, name_to_view)
         leaves_df = pd.DataFrame({"y": leaf_y, "obs": leaf_obs})
 
         matrices = [
@@ -267,7 +316,7 @@ class TreedataAdaptor(AnndataAdaptor):
                 {
                     "x": np.asarray(nx_, dtype=np.float32),
                     "y": np.asarray(ny_, dtype=np.float32),
-                    "obs": obs_index.get_indexer(node_names).astype(np.int32),
+                    "obs": self._obs_indexer(node_names, obs_index, name_to_view),
                 }
             )
             matrices.append(encode_matrix_fbs(nodes_df, col_idx=nodes_df.columns, row_idx=None))

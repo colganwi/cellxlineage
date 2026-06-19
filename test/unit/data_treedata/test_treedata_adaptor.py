@@ -79,6 +79,36 @@ class TreedataAdaptorLineageTest(unittest.TestCase):
         n_leaves = sum(1 for n in tree.nodes if tree.out_degree(n) == 0)
         self.assertEqual(len(leaves), n_leaves)
 
+    def test_subset_induced_subtree(self):
+        # Simulate an active subset: keep three leaves of one tree and verify
+        # the server returns just their induced subtree, with obs indices
+        # remapped into the subset (view) coordinate space.
+        tree_name = "E7.5-R1-C1"
+        tree = self.data.data.obst[tree_name]
+        obs_index = self.data.get_obs_index()
+        leaf_names = [n for n in tree.nodes if tree.out_degree(n) == 0]
+        keep_leaf_names = leaf_names[:3]
+        keep_obs = sorted(int(p) for p in obs_index.get_indexer(keep_leaf_names))
+
+        fbs = self.data.lineage_to_fbs_matrix([tree_name], "depth", keep_obs=keep_obs)
+        branches, leaves = unframe_matrices(fbs)
+
+        # Only the selected leaves survive.
+        self.assertEqual(len(leaves), 3)
+        # obs indices are positions within the subset, not the full obs index.
+        self.assertEqual(sorted(leaves["obs"].to_numpy().tolist()), [0, 1, 2])
+
+        # Branches match the induced subtree (selected leaves + their ancestors).
+        pruned = self.data._prune_tree(tree, set(keep_leaf_names))
+        self.assertEqual(len(branches), 2 * pruned.number_of_edges())
+
+    def test_subset_empty_when_no_leaves_kept(self):
+        # keep_obs that matches no leaves of the selected tree → empty layout.
+        fbs = self.data.lineage_to_fbs_matrix(["E7.5-R1-C1"], "depth", keep_obs=[])
+        branches, leaves = unframe_matrices(fbs)
+        self.assertEqual(len(leaves), 0)
+        self.assertEqual(len(branches), 0)
+
 
 def meta_trees(adaptor):
     return adaptor.get_lineage_default_trees()
