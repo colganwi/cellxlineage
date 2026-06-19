@@ -10,7 +10,15 @@ network call the panel makes (on tree/depth-key change).
 */
 async function _fetchLineageData(dispatch, getState) {
   const { annoMatrix, lineageChoice } = getState();
-  if (!annoMatrix || !lineageChoice?.current?.length) return;
+  if (!annoMatrix) return;
+  if (!lineageChoice?.current?.length) {
+    // No tree selected (e.g. the user cleared the selection). Empty the panel
+    // rather than leaving the previously drawn tree on screen.
+    if (lineageChoice?.available?.length) {
+      dispatch({ type: "lineage: data loaded", data: null });
+    }
+    return;
+  }
   dispatch({ type: "lineage: data load start" });
   try {
     // When a subset view is active, send the surviving obs row positions (the

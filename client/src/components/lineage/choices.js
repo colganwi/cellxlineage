@@ -39,13 +39,24 @@ const LineageChoices = ({ dispatch, lineageChoice, loading }) => {
     const set = new Set(current);
     if (set.has(name)) set.delete(name);
     else set.add(name);
-    // keep at least one tree selected, preserving the available order
+    // preserve the available order; an empty selection is allowed (clears the panel)
     const next = available.filter((n) => set.has(n));
-    if (next.length) dispatch(actions.lineageTreeChoiceAction(next));
+    dispatch(actions.lineageTreeChoiceAction(next));
+  };
+
+  const handleSelectAllTrees = () => {
+    dispatch(actions.lineageTreeChoiceAction(available));
+  };
+
+  const handleClearTrees = () => {
+    // Deselect all so a single tree can then be picked without unchecking many.
+    dispatch(actions.lineageTreeChoiceAction([]));
   };
 
   const treeLabel =
-    current.length === available.length
+    current.length === 0
+      ? "Select tree"
+      : current.length === available.length
       ? "All trees"
       : current.length === 1
       ? current[0]
@@ -64,14 +75,20 @@ const LineageChoices = ({ dispatch, lineageChoice, loading }) => {
           ))}
         </RadioGroup>
       ) : (
-        available.map((name) => (
-          <Checkbox
-            key={name}
-            label={name}
-            checked={current.includes(name)}
-            onChange={() => handleMultiTreeToggle(name)}
-          />
-        ))
+        <>
+          <ButtonGroup minimal style={{ marginBottom: 6 }}>
+            <Button small text="All" onClick={handleSelectAllTrees} />
+            <Button small text="None" onClick={handleClearTrees} />
+          </ButtonGroup>
+          {available.map((name) => (
+            <Checkbox
+              key={name}
+              label={name}
+              checked={current.includes(name)}
+              onChange={() => handleMultiTreeToggle(name)}
+            />
+          ))}
+        </>
       )}
     </div>
   );
