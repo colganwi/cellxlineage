@@ -12,6 +12,7 @@ import _drawNodes from "./drawNodesRegl";
 import LineageChoices from "./choices";
 import setupTreeSelector from "./setupTreeSelector";
 import setupTreeZoom from "./setupTreeZoom";
+import TreeScrollbar from "./scrollbar";
 import {
   createColorTable,
   createColorQuery,
@@ -179,11 +180,25 @@ class Lineage extends React.PureComponent {
     this.state = { regl: null };
   }
 
+  componentDidMount() {
+    this._mounted = true;
+  }
+
   componentWillUnmount() {
+    this._mounted = false;
     if (this.resizeObserver) this.resizeObserver.disconnect();
     if (this.lasso) this.lasso.detach();
     if (this.zoom) this.zoom.detach();
   }
+
+  // Update the vertical zoom window: `this.yView` is the synchronous source of
+  // truth (read during rapid wheel/drag events); forceUpdate re-renders the
+  // scrollbar to track it, and renderCanvas redraws the tree.
+  setYView = (v) => {
+    this.yView = v;
+    this.renderCanvas();
+    if (this._mounted) this.forceUpdate();
+  };
 
   setReglCanvas = (canvas) => {
     this.reglCanvas = canvas;
@@ -302,10 +317,7 @@ class Lineage extends React.PureComponent {
     this.zoom = setupTreeZoom(this.reglCanvas, {
       getMode,
       getView: () => this.yView,
-      setView: (v) => {
-        this.yView = v;
-        this.renderCanvas();
-      },
+      setView: this.setYView,
       getPlotRect: () => ({
         yTop: MARGIN.top,
         yBot: this.canvasSize.height - MARGIN.bottom,
@@ -337,7 +349,15 @@ class Lineage extends React.PureComponent {
     // but preserve it across color/selection updates.
     if (asyncProps.data !== this.lastData) {
       this.lastData = asyncProps.data;
+      const wasZoomed = this.yView.lo !== 0 || this.yView.hi !== 1;
       this.yView = { lo: 0, hi: 1 };
+      // This runs inside the Async render path, so defer the scrollbar
+      // re-render (forceUpdate during render is not allowed).
+      if (wasZoomed) {
+        Promise.resolve().then(() => {
+          if (this._mounted) this.forceUpdate();
+        });
+      }
     }
     const {
       branchBuffer,
@@ -541,6 +561,12 @@ class Lineage extends React.PureComponent {
               }}
             </Async.Fulfilled>
           </Async>
+          <TreeScrollbar
+            view={this.yView}
+            onChange={this.setYView}
+            top={MARGIN.top}
+            bottom={MARGIN.bottom}
+          />
         </div>
         <LineageChoices
           dispatch={dispatch}
