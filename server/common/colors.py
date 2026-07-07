@@ -1,5 +1,7 @@
 import re
 
+import numpy as np
+
 from server.common.errors import ColorFormatException
 
 HEX_COLOR_FORMAT = re.compile("^#[a-fA-F0-9]{6,6}$")
@@ -177,6 +179,11 @@ def convert_color_to_hex_format(unknown):
     :return: a hex triplet representing that color
     """
     try:
+        # numpy arrays (e.g. a float RGB triplet from a matplotlib colormap that
+        # scanpy/anndata wrote into uns "*_colors") aren't list/tuple, so normalize
+        # them to a plain Python list before the length/range checks below.
+        if isinstance(unknown, np.ndarray):
+            unknown = unknown.tolist()
         if type(unknown) in (list, tuple) and len(unknown) == 3:
             if all(0.0 <= ele <= 1.0 for ele in unknown):
                 tup = tuple(int(ele * 255) for ele in unknown)

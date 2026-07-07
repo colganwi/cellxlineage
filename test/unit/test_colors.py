@@ -1,6 +1,7 @@
 import unittest
 
 import anndata
+import numpy as np
 
 from server.common.colors import convert_color_to_hex_format, convert_anndata_category_colors_to_cxg_category_colors
 from server.common.errors import ColorFormatException
@@ -20,6 +21,15 @@ class ColorsTest(unittest.TestCase):
         self.assertEqual(
             convert_color_to_hex_format([0.9607843137254902, 0.8705882352941177, 0.7019607843137254]), "#f5deb3"
         )
+        # numpy float RGB triplet (as scanpy/anndata write into uns "*_colors"
+        # from a matplotlib colormap) is accepted like a plain list/tuple
+        self.assertEqual(
+            convert_color_to_hex_format(
+                np.array([0.9607843137254902, 0.8705882352941177, 0.7019607843137254])
+            ),
+            "#f5deb3",
+        )
+        self.assertEqual(convert_color_to_hex_format(np.array([245, 222, 179])), "#f5deb3")
         # hex triplet with an alpha byte (#RRGGBBAA) is accepted; alpha is dropped
         self.assertEqual(convert_color_to_hex_format("#f5deb3ff"), "#f5deb3")
         self.assertEqual(convert_color_to_hex_format("#AABBCCDD"), "#aabbcc")

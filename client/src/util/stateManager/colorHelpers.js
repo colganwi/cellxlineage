@@ -180,10 +180,13 @@ const createColorsByCategoricalMetadata = memoize(
 );
 
 function createRgbArray(data, colors) {
+  // fallback for cells whose label has no assigned color — e.g. an NA/null
+  // (missing) categorical value, which arrives as `null` from the server.
+  const naColor = parseRGB(globals.naCellColor);
   const rgb = new Array(data.length);
   for (let i = 0, len = data.length; i < len; i += 1) {
     const label = data[i];
-    rgb[i] = colors[label];
+    rgb[i] = colors[label] ?? naColor;
   }
   return rgb;
 }

@@ -47,7 +47,10 @@ export const brightBlue = "#4a90e2";
 export const brightGreen = "#A2D729";
 export const darkGreen = "#448C4D";
 
-export const nonFiniteCellColor = lightGrey;
+/* color used for cells whose color-by value is NA/null (missing categorical
+   label) or non-finite (NaN/Inf continuous value) */
+export const naCellColor = "#d3d3d3"; /* lightgray */
+export const nonFiniteCellColor = naCellColor;
 export const defaultCellColor = "rgb(0,0,0,1)";
 export const logoColor = "black"; /* logo pink: "#E9429A" */
 
