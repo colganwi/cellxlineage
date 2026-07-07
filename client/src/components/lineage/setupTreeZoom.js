@@ -9,7 +9,7 @@ always shows the full root→leaves span. Zooming subsets the visible leaves to 
 The window is read/written via callbacks so the Lineage component owns the
 state and re-renders on change.
 */
-const MIN_RANGE = 0.004; // smallest visible fraction of leaves
+const MIN_RANGE = 0.002; // smallest visible fraction of leaves
 const ZOOM_STEP = 0.85; // wheel-up shrinks the window to 85%
 
 export default function setupTreeZoom(

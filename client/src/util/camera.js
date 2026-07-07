@@ -3,7 +3,7 @@ import { vec2, mat3 } from "gl-matrix";
 const EPSILON = 0.000001;
 
 const scaleSpeed = 0.5;
-const scaleMax = 3.0;
+const scaleMax = 6.0;
 const scaleMin = 0.5;
 const panBound = 0.8;
 
