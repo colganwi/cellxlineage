@@ -1,8 +1,7 @@
 import importlib.metadata
 import struct
-from collections import deque
+from collections import OrderedDict, deque
 
-import networkx as nx
 import numpy as np
 import pandas as pd
 import treedata as td
@@ -13,6 +12,11 @@ from server.data_anndata.anndata_adaptor import AnndataAdaptor
 
 
 class TreedataAdaptor(AnndataAdaptor):
+    # Full-tree (no-subset) layouts are deterministic in (trees, depth_key) and
+    # the data is read-only, so their framed FBS is cached. Bounded because a
+    # single full layout can be large (tens of MB at >1M cells).
+    _LINEAGE_CACHE_MAX = 16
+
     def get_name(self):
         return "cellxlineage treedata adaptor version"
 
@@ -51,6 +55,9 @@ class TreedataAdaptor(AnndataAdaptor):
         non_array_keys = [k for k, v in self.data.obsm.items() if not isinstance(v, np.ndarray)]
         for key in non_array_keys:
             del self.data.obsm[key]
+
+        # LRU cache of framed FBS for full-tree (no-subset) layouts.
+        self._lineage_layout_cache = OrderedDict()
 
     # ------------------------------------------------------------------ #
     # Lineage tree support                                               #
@@ -121,11 +128,17 @@ class TreedataAdaptor(AnndataAdaptor):
         return ["depth"] + sorted(common - {"depth"})
 
     def get_lineage_default_depth_key(self):
-        """Default depth axis: 'depth' unless tdata.uns['default_depth'] overrides
-        it with another available numeric key (mirrors pycea's resolution)."""
+        """Default depth axis (x-axis) for node placement. Precedence:
+        1. tdata.uns['default_depth'], if it names an available numeric key
+           (explicit override, mirrors pycea's resolution);
+        2. 'time', when available on every node (preferred over topological depth);
+        3. 'depth' (topological depth from the root)."""
+        keys = self.get_lineage_depth_keys()
         uns_default = self.data.uns.get("default_depth")
-        if uns_default and uns_default in self.get_lineage_depth_keys():
+        if uns_default and uns_default in keys:
             return uns_default
+        if "time" in keys:
+            return "time"
         return "depth"
 
     def get_lineage_meta(self):
@@ -170,51 +183,94 @@ class TreedataAdaptor(AnndataAdaptor):
                 return node
             node = preds[0]
 
+    def _full_topology(self, tree):
+        """Plain-dict topology of a whole tree: (children, root). `children` maps
+        each node to its list of children in the original adjacency order. Uses
+        the raw adjacency dict to avoid networkx per-node method overhead."""
+        succ = tree._succ  # {node: {child: attrs}} — insertion-ordered
+        children = {n: list(kids) for n, kids in succ.items()}
+        return children, self._tree_root(tree)
+
     @staticmethod
-    def _node_depths(tree, root, depth_key):
-        """Per-node depth values. Uses the stored attribute when present on every
-        node; for 'depth' falls back to topological depth from the root (hops),
-        matching pycea.pp.add_depth."""
-        attrs = nx.get_node_attributes(tree, depth_key)
-        if len(attrs) == tree.number_of_nodes():
-            return attrs
-        if depth_key == "depth":
-            return nx.single_source_shortest_path_length(tree, root)
-        raise DatasetAccessError(f"Every node must have a numeric '{depth_key}' attribute.")
+    def _induced_topology(tree, keep_set):
+        """Plain-dict topology of the induced subtree of the kept leaves: the
+        selected leaves plus all of their ancestors (unifurcations retained,
+        matching TreeData / _prune_tree). Built directly from the raw adjacency
+        dicts — no networkx subgraph view (which is very slow to traverse).
 
-    def _layout_trees(self, trees, depth_key):
-        """Rectangular layout, reimplemented from pycea.pl._utils.layout_trees
-        (extend_branches=False, angled_branches=False) to avoid pulling in the
-        matplotlib import chain on the server hot path.
-
-        Returns (node_coords, leaves) where node_coords maps (tree, node) ->
-        (x=depth, y=position) and leaves is the ordered list of (tree, leaf).
+        Returns (children, root) or None when no leaf of this tree is kept.
         """
-        # Ordered leaves across all trees (dfs postorder within each tree).
-        roots = {}
-        leaves = []
-        for key, tree in trees.items():
-            root = self._tree_root(tree)
-            roots[key] = root
-            leaves.extend(
-                (key, node) for node in nx.dfs_postorder_nodes(tree, root) if tree.out_degree(node) == 0
-            )
-        n_leaves = len(leaves)
-        if n_leaves == 0:
-            return {}, []
-        leaf_y = {leaf: i / n_leaves for i, leaf in enumerate(leaves)}
+        succ = tree._succ
+        pred = tree._pred
+        # Leaves of this tree that survive the subset (leaf names == obs names).
+        # Iterate this tree's leaves (bounded by tree size) rather than the whole
+        # subset per tree, so cost doesn't scale with (subset size × #trees).
+        kept = {n for n, kids in succ.items() if not kids and n in keep_set}
+        if not kept:
+            return None
+        # Walk up to the root, adding every ancestor.
+        queue = deque(kept)
+        while queue:
+            node = queue.popleft()
+            parents = pred[node]
+            if parents:
+                parent = next(iter(parents))
+                if parent not in kept:
+                    kept.add(parent)
+                    queue.append(parent)
+        # Children (original order) restricted to kept nodes; root has no kept parent.
+        children = {}
+        root = None
+        for node in kept:
+            children[node] = [c for c in succ[node] if c in kept]
+            parents = pred[node]
+            if not parents or next(iter(parents)) not in kept:
+                root = node
+        return children, root
 
-        node_coords = {}
-        for key, tree in trees.items():
-            depths = self._node_depths(tree, roots[key], depth_key)
-            for node in nx.dfs_postorder_nodes(tree, roots[key]):
-                if tree.out_degree(node) == 0:
-                    y = leaf_y[(key, node)]
-                else:
-                    child_ys = [node_coords[(key, c)][1] for c in tree.successors(node)]
-                    y = (min(child_ys) + max(child_ys)) / 2
-                node_coords[(key, node)] = (float(depths[node]), y)
-        return node_coords, leaves
+    @staticmethod
+    def _postorder(children, root):
+        """Iterative DFS postorder over the plain-dict `children` adjacency.
+        Children are visited in their original order (so the leaf ordering, and
+        thus y positions, match a recursive postorder)."""
+        order = []
+        stack = [(root, False)]
+        while stack:
+            node, processed = stack.pop()
+            if processed:
+                order.append(node)
+                continue
+            stack.append((node, True))
+            kids = children[node]
+            for i in range(len(kids) - 1, -1, -1):  # reversed → popped in order
+                stack.append((kids[i], False))
+        return order
+
+    def _topology_depths(self, tree, nodes, children, root, depth_key):
+        """Depth (x-axis) value per node. Uses the stored attribute when every
+        laid-out node carries it; for 'depth' falls back to topological depth
+        from the root (hops), matching pycea.pp.add_depth."""
+        node_attrs = tree._node  # {node: attrs}
+        missing = object()
+        depths = {}
+        for n in nodes:
+            v = node_attrs[n].get(depth_key, missing)
+            if v is missing:
+                depths = None
+                break
+            depths[n] = v
+        if depths is not None:
+            return depths
+        if depth_key == "depth":
+            depths = {root: 0}
+            queue = deque([root])
+            while queue:
+                u = queue.popleft()
+                for c in children[u]:
+                    depths[c] = depths[u] + 1
+                    queue.append(c)
+            return depths
+        raise DatasetAccessError(f"Every node must have a numeric '{depth_key}' attribute.")
 
     @staticmethod
     def _obs_indexer(names, obs_index, name_to_view):
@@ -256,44 +312,121 @@ class TreedataAdaptor(AnndataAdaptor):
         if len(trees) > 1 and bool(getattr(self.data, "has_overlap", False)):
             raise DatasetAccessError("Cannot lay out multiple trees when trees share observations; select one tree.")
 
+        # Full-tree layouts (no active subset) are cached: they depend only on
+        # the resolved tree selection and depth key, and the data is read-only.
+        cache_key = None
+        if keep_obs is None:
+            cache_key = (tuple(trees.keys()), depth_key)
+            cached = self._lineage_layout_cache.get(cache_key)
+            if cached is not None:
+                self._lineage_layout_cache.move_to_end(cache_key)
+                return cached
+
         # Map node/leaf names → obs row position (leaf names match obs index).
         obs_index = self.get_obs_index()
 
-        # Active subset: prune trees to the selected leaves' induced subtree and
-        # emit obs indices in the subset's (view) coordinate space.
+        # Active subset: restrict each tree to the selected leaves' induced
+        # subtree and emit obs indices in the subset's (view) coordinate space.
         name_to_view = None
+        keep_set = None
         if keep_obs is not None:
             keep_obs = np.asarray(keep_obs, dtype=np.int64)
             keep_names = obs_index[keep_obs]
             keep_set = set(keep_names)
             name_to_view = {name: i for i, name in enumerate(keep_names)}
-            trees = {k: self._prune_tree(t, keep_set) for k, t in trees.items()}
-            trees = {k: t for k, t in trees.items() if t.number_of_nodes() > 0}
 
-        node_coords, leaves = self._layout_trees(trees, depth_key)
-
-        # Branch segments.
-        seg_x0, seg_y0, seg_x1, seg_y1 = [], [], [], []
+        # Plain-dict topology per tree (no networkx traversal on the hot path).
+        # For a subset, the induced subtree; otherwise the whole tree.
+        topos = {}
         for key, tree in trees.items():
-            for parent, child in tree.edges():
-                px, py = node_coords[(key, parent)]
-                cx, cy = node_coords[(key, child)]
-                # vertical segment at parent's depth, from py to cy
-                seg_x0.append(px), seg_y0.append(py), seg_x1.append(px), seg_y1.append(cy)
-                # horizontal segment at child's position, from px to cx
-                seg_x0.append(px), seg_y0.append(cy), seg_x1.append(cx), seg_y1.append(cy)
+            if keep_set is None:
+                topos[key] = self._full_topology(tree)
+            else:
+                induced = self._induced_topology(tree, keep_set)
+                if induced is not None:
+                    topos[key] = induced
+
+        want_nodes = getattr(self.data, "alignment", "leaves") != "leaves"
+
+        # Pass 1: postorder each tree and count its leaves (for global y offsets).
+        orders = {}
+        n_total = 0
+        for key, (children, root) in topos.items():
+            order = self._postorder(children, root)
+            orders[key] = order
+            n_total += sum(1 for n in order if not children[n])
+
+        # Pass 2: per-tree layout + vectorized branch segments. Leaf y positions
+        # are the global leaf index / n_total, matching a single ordered pass.
+        x0_parts, y0_parts, x1_parts, y1_parts = [], [], [], []
+        leaf_names, leaf_y_parts = [], []
+        node_names, node_x, node_y = [], [], []
+        leaf_offset = 0
+        for key, (children, root) in topos.items():
+            tree = trees[key]
+            order = orders[key]
+            depths = self._topology_depths(tree, order, children, root, depth_key)
+
+            x, y = {}, {}
+            li = leaf_offset
+            for node in order:  # postorder → children resolved before parents
+                kids = children[node]
+                if not kids:
+                    yy = li / n_total
+                    li += 1
+                    leaf_names.append(node)
+                    leaf_y_parts.append(yy)
+                else:
+                    cys = [y[c] for c in kids]
+                    yy = (min(cys) + max(cys)) / 2
+                    if want_nodes:
+                        node_names.append(node)
+                        node_x.append(float(depths[node]))
+                        node_y.append(yy)
+                y[node] = yy
+                x[node] = float(depths[node])
+            leaf_offset = li
+
+            # Branch segments for this tree, built vectorized. Each edge → an
+            # elbow: a vertical segment at the parent's depth then a horizontal
+            # segment at the child's position.
+            pxs, pys, cxs, cys = [], [], [], []
+            for parent, kids in children.items():
+                xp, yp = x[parent], y[parent]
+                for child in kids:
+                    pxs.append(xp)
+                    pys.append(yp)
+                    cxs.append(x[child])
+                    cys.append(y[child])
+            ne = len(pxs)
+            if ne:
+                pxs = np.asarray(pxs, dtype=np.float32)
+                pys = np.asarray(pys, dtype=np.float32)
+                cxs = np.asarray(cxs, dtype=np.float32)
+                cys = np.asarray(cys, dtype=np.float32)
+                x0 = np.empty(2 * ne, dtype=np.float32)
+                y0 = np.empty(2 * ne, dtype=np.float32)
+                x1 = np.empty(2 * ne, dtype=np.float32)
+                y1 = np.empty(2 * ne, dtype=np.float32)
+                x0[0::2], y0[0::2], x1[0::2], y1[0::2] = pxs, pys, pxs, cys  # vertical
+                x0[1::2], y0[1::2], x1[1::2], y1[1::2] = pxs, cys, cxs, cys  # horizontal
+                x0_parts.append(x0)
+                y0_parts.append(y0)
+                x1_parts.append(x1)
+                y1_parts.append(y1)
+
+        empty = np.empty(0, dtype=np.float32)
         branches_df = pd.DataFrame(
             {
-                "x0": np.asarray(seg_x0, dtype=np.float32),
-                "y0": np.asarray(seg_y0, dtype=np.float32),
-                "x1": np.asarray(seg_x1, dtype=np.float32),
-                "y1": np.asarray(seg_y1, dtype=np.float32),
+                "x0": np.concatenate(x0_parts) if x0_parts else empty,
+                "y0": np.concatenate(y0_parts) if y0_parts else empty,
+                "x1": np.concatenate(x1_parts) if x1_parts else empty,
+                "y1": np.concatenate(y1_parts) if y1_parts else empty,
             }
         )
 
         # Leaves: y position + obs row index.
-        leaf_names = [node for (_key, node) in leaves]
-        leaf_y = np.asarray([node_coords[leaf][1] for leaf in leaves], dtype=np.float32)
+        leaf_y = np.asarray(leaf_y_parts, dtype=np.float32)
         leaf_obs = self._obs_indexer(leaf_names, obs_index, name_to_view)
         leaves_df = pd.DataFrame({"y": leaf_y, "obs": leaf_obs})
 
@@ -303,22 +436,20 @@ class TreedataAdaptor(AnndataAdaptor):
         ]
 
         # Internal-node coloring when observations align beyond leaves.
-        if getattr(self.data, "alignment", "leaves") != "leaves":
-            node_names, nx_, ny_ = [], [], []
-            for key, tree in trees.items():
-                for node in tree.nodes:
-                    if tree.out_degree(node) != 0:
-                        x, y = node_coords[(key, node)]
-                        node_names.append(node)
-                        nx_.append(x)
-                        ny_.append(y)
+        if want_nodes:
             nodes_df = pd.DataFrame(
                 {
-                    "x": np.asarray(nx_, dtype=np.float32),
-                    "y": np.asarray(ny_, dtype=np.float32),
+                    "x": np.asarray(node_x, dtype=np.float32),
+                    "y": np.asarray(node_y, dtype=np.float32),
                     "obs": self._obs_indexer(node_names, obs_index, name_to_view),
                 }
             )
             matrices.append(encode_matrix_fbs(nodes_df, col_idx=nodes_df.columns, row_idx=None))
 
-        return self._frame_matrices(matrices)
+        result = self._frame_matrices(matrices)
+        if cache_key is not None:
+            self._lineage_layout_cache[cache_key] = result
+            self._lineage_layout_cache.move_to_end(cache_key)
+            while len(self._lineage_layout_cache) > self._LINEAGE_CACHE_MAX:
+                self._lineage_layout_cache.popitem(last=False)
+        return result

@@ -40,12 +40,13 @@ class TreedataAdaptorLineageTest(unittest.TestCase):
     def test_lineage_meta(self):
         meta = self.data.get_lineage_meta()
         self.assertEqual(meta["names"], ["E7.5-R1-C1", "E7.5-R1-C2"])
-        # 'depth' is always offered (computed topologically when not stored) and
-        # is the default. 'time' and 'id' are numeric on every node.
+        # 'depth' is always offered first (computed topologically when not
+        # stored). 'time' and 'id' are numeric on every node. 'time' is
+        # preferred as the default when available.
         self.assertEqual(meta["depthKeys"][0], "depth")
         self.assertIn("time", meta["depthKeys"])
         self.assertIn("id", meta["depthKeys"])
-        self.assertEqual(meta["defaultDepthKey"], "depth")
+        self.assertEqual(meta["defaultDepthKey"], "time")
         self.assertEqual(meta["alignment"], "leaves")
         # Non-overlapping trees → both selected by default.
         self.assertEqual(meta["defaultTrees"], ["E7.5-R1-C1", "E7.5-R1-C2"])
@@ -108,6 +109,25 @@ class TreedataAdaptorLineageTest(unittest.TestCase):
         branches, leaves = unframe_matrices(fbs)
         self.assertEqual(len(leaves), 0)
         self.assertEqual(len(branches), 0)
+
+    def test_full_layout_is_cached(self):
+        # Full-tree (no-subset) layouts are cached by (trees, depth_key) and the
+        # cached bytes are byte-identical to a fresh computation.
+        self.data._lineage_layout_cache.clear()
+        first = self.data.lineage_to_fbs_matrix(["E7.5-R1-C1"], "depth")
+        self.assertEqual(len(self.data._lineage_layout_cache), 1)
+        second = self.data.lineage_to_fbs_matrix(["E7.5-R1-C1"], "depth")
+        self.assertIs(first, second)  # served from cache, not recomputed
+        self.assertEqual(first, second)
+        # A different depth key is a distinct cache entry.
+        self.data.lineage_to_fbs_matrix(["E7.5-R1-C1"], "time")
+        self.assertEqual(len(self.data._lineage_layout_cache), 2)
+
+    def test_subset_layout_is_not_cached(self):
+        # Subset (keep_obs) results vary per selection and must not be cached.
+        self.data._lineage_layout_cache.clear()
+        self.data.lineage_to_fbs_matrix(["E7.5-R1-C1"], "depth", keep_obs=[0, 1, 2])
+        self.assertEqual(len(self.data._lineage_layout_cache), 0)
 
 
 def meta_trees(adaptor):
