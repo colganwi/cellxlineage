@@ -9,12 +9,12 @@ always shows the full root→leaves span. Zooming subsets the visible leaves to 
 The window is read/written via callbacks so the Lineage component owns the
 state and re-renders on change.
 */
-const MIN_RANGE = 0.002; // smallest visible fraction of leaves
+const MIN_RANGE = 0.002; // default smallest visible fraction of leaves
 const ZOOM_STEP = 0.85; // wheel-up shrinks the window to 85%
 
 export default function setupTreeZoom(
   canvas,
-  { getMode, getView, setView, getPlotRect }
+  { getMode, getView, setView, getPlotRect, getMinRange }
 ) {
   let panning = false;
   let lastY = 0;
@@ -31,11 +31,14 @@ export default function setupTreeZoom(
   const clampView = (loIn, hiIn) => {
     let lo = loIn;
     let hi = hiIn;
+    // Smallest allowed visible window (max zoom). Dynamic via getMinRange (e.g.
+    // capped so at most ~100 leaves fill the pane on large trees); else default.
+    const minRange = getMinRange?.() ?? MIN_RANGE;
     if (hi - lo >= 1) return { lo: 0, hi: 1 };
-    if (hi - lo < MIN_RANGE) {
+    if (hi - lo < minRange) {
       const mid = (lo + hi) / 2;
-      lo = mid - MIN_RANGE / 2;
-      hi = mid + MIN_RANGE / 2;
+      lo = mid - minRange / 2;
+      hi = mid + minRange / 2;
     }
     if (lo < 0) {
       hi -= lo;

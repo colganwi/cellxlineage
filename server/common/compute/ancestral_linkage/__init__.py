@@ -1,14 +1,23 @@
-"""Vendored copy of pycea's ancestral-linkage compute.
+"""Trees-only ancestral-linkage compute, derived from pycea.tl.ancestral_linkage.
 
-Only the compute chain of ``pycea.tl.ancestral_linkage`` is vendored (the module and its
-five helper modules), with intra-package imports rewritten to relative imports. This
-avoids depending on ``pycea`` as a whole, whose top-level ``__init__`` eagerly imports the
-plotting submodule and therefore pulls in matplotlib and scanpy. The compute itself needs
-only networkx / numpy / pandas / scipy / scikit-learn / natsort / treedata / tqdm.
+The public entry points — :func:`linkage_pairwise_matrix` and
+:func:`linkage_selected_scores` — operate directly on a ``{name: networkx.DiGraph}``
+dict plus a ``leaf name → category`` mapping and return plain results. There is no
+TreeData: cellxlineage passes its trees by reference (no copy, no counts matrix) and
+does subsetting as the induced subtree of the selected leaves (see
+``TreedataAdaptor._linkage_trees`` / ``treedata.subset_tree``).
 
-Keep these files in sync with upstream pycea when the linkage algorithm changes:
-``/lab/solexa_weissman/wcolgan/pycea/src/pycea/{tl/ancestral_linkage.py,tl/tree_distance.py,
-tl/_metrics.py,tl/_aggregators.py,tl/_utils.py,utils.py}``.
+Only the ``metric="path"``, ``aggregate="min"``, ``normalize=True``,
+``permutation_mode="non_target"`` path that cellxlineage uses is kept; results are
+identical to pycea's ``ancestral_linkage`` for that configuration. Dropped from the
+vendored copy vs. upstream: the TreeData-coupled public ``ancestral_linkage`` and its
+``by_tree`` / ``test`` / ``permutation_mode='all'`` branches; the all-pairs distance
+path (``tree_distance``, scikit-learn); category helpers pulling natsort; and the
+tqdm/multiprocessing progress+parallel machinery (a single permutation is run). Needs
+only networkx / numpy / pandas / scipy.
+
+Sync source: ``/lab/solexa_weissman/wcolgan/pycea/src/pycea/tl/ancestral_linkage.py``
+(+ ``utils.py`` helpers).
 """
 
 from __future__ import annotations
@@ -18,9 +27,16 @@ import pandas as pd
 import scipy.cluster.hierarchy as sch
 import scipy.spatial.distance as ssd
 
-from .ancestral_linkage import ancestral_linkage
+from .ancestral_linkage import (
+    linkage_pairwise_matrix,
+    linkage_selected_scores,
+)
 
-__all__ = ["ancestral_linkage", "cluster_order"]
+__all__ = [
+    "linkage_pairwise_matrix",
+    "linkage_selected_scores",
+    "cluster_order",
+]
 
 
 def cluster_order(matrix: pd.DataFrame, method: str = "average", negate: bool = False) -> list[int]:

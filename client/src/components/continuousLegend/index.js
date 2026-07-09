@@ -147,8 +147,13 @@ class ContinuousLegend extends React.Component {
       if (colorAccessor && colorScale && range && domainMin < domainMax) {
         /* fragile! continuous range is 0 to 1, not [#fa4b2c, ...], make this a flag? */
         if (range()[0][0] !== "#") {
+          // The legend canvas is drawn flipped (scale(1,-1)) to put high values at
+          // the top, which suits the sequential ramp. For the diverging linkage
+          // ramp that flip would otherwise render red at the bottom (low) while the
+          // axis labels high at the top, so reverse the interpolator to cancel it
+          // and keep red = high (matching the UMAP/tree points).
           const interpolator = isAncestralLinkageColumn(schema, colorAccessor)
-            ? linkageDivergingColor
+            ? (t) => linkageDivergingColor(1 - t)
             : interpolateCool;
           continuous(
             "#continuous_legend",

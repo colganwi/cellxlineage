@@ -1,6 +1,10 @@
 const initialState = {
   metadataField: "",
   categoryField: "",
+  // The set of category labels (of metadataField) to dilate/highlight. A single
+  // label for the left-sidebar category hover; two labels for a pairwise linkage
+  // heatmap cell hover. `null` when nothing is hovered.
+  categoryFields: null,
 };
 
 const pointDialation = (state = initialState, action) => {
@@ -12,6 +16,7 @@ const pointDialation = (state = initialState, action) => {
         ...state,
         metadataField,
         categoryField,
+        categoryFields: [categoryField],
       };
 
     case "category value mouse hover end":
@@ -22,6 +27,18 @@ const pointDialation = (state = initialState, action) => {
         return initialState;
       }
       return state;
+
+    // Highlight several categories of one field at once (pairwise linkage
+    // heatmap cell hover → the cell's row + column categories).
+    case "category values mouse hover start":
+      return {
+        metadataField: action.metadataField,
+        categoryField: "",
+        categoryFields: action.labels,
+      };
+
+    case "category values mouse hover end":
+      return initialState;
 
     default:
       return state;

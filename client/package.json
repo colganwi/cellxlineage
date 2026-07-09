@@ -1,6 +1,6 @@
 {
   "name": "cellxlineage",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "license": "MIT",
   "description": "cellxlineage is a web application for single-cell data exploration with lineage tree visualization.",
   "repository": "https://github.com/chanzuckerberg/cellxgene",

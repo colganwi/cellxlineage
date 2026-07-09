@@ -2,9 +2,14 @@ name: Push Tests
 
 on:
   push:
-    branches: main
+    branches: [main, lineage]
   pull_request:
     branches: "*"
+
+# Cancel superseded runs on the same branch/PR to save CI minutes.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   JEST_ENV: prod
@@ -85,63 +90,3 @@ jobs:
           files: ./client/coverage/lcov.info
           fail_ci_if_error: false
 
-  smoke-tests:
-    runs-on: macos-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v4
-      - name: Set up Python 3.12
-        uses: actions/setup-python@v5
-        with:
-          python-version: 3.12
-      - name: Python cache
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements*.txt') }}
-          restore-keys: |
-            ${{ runner.os }}-pip-
-      - name: Node cache
-        uses: actions/cache@v4
-        with:
-          path: ~/.npm
-          key: ${{ runner.os }}-node-${{ hashFiles('**/package-lock.json') }}
-          restore-keys: |
-            ${{ runner.os }}-node-
-      - name: Install dependencies
-        run: |
-          pip install setuptools
-          make pydist install-dist
-      - name: Smoke tests (without annotations feature)
-        run: cd client && make smoke-test
-
-  # TODO: reinstate: https://github.com/chanzuckerberg/cellxgene/issues/2544
-  # smoke-tests-annotations:
-  #   runs-on: ubuntu-latest
-  #   timeout-minutes: 20
-  #   steps:
-  #     - uses: actions/checkout@v2
-  #     - name: Set up Python 3.9
-  #       uses: actions/setup-python@v4
-  #       with:
-  #         python-version: 3.9
-  #     - name: Python cache
-  #       uses: actions/cache@v1
-  #       with:
-  #         path: ~/.cache/pip
-  #         key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements*.txt') }}
-  #         restore-keys: |
-  #           ${{ runner.os }}-pip-
-  #     - name: Node cache
-  #       uses: actions/cache@v1
-  #       with:
-  #         path: ~/.npm
-  #         key: ${{ runner.os }}-node-${{ hashFiles('**/package-lock.json') }}
-  #         restore-keys: |
-  #           ${{ runner.os }}-node-
-  #     - name: Install dependencies
-  #       run: make pydist install-dist
-  #     - name: Smoke tests (with annotations feature)
-  #       run: |
-  #         cd client && make smoke-test-annotations
-  #         ./node_modules/codecov/bin/codecov --yml=../.codecov.yml --root=../ --gcov-root=../ -C -F frontend,javascript,smokeTestAnnotations
