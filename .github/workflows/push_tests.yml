@@ -2,9 +2,14 @@ name: Push Tests
 
 on:
   push:
-    branches: main
+    branches: [main, lineage]
   pull_request:
     branches: "*"
+
+# Cancel superseded runs on the same branch/PR to save CI minutes.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   JEST_ENV: prod
