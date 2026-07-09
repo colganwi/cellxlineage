@@ -137,6 +137,65 @@ export default class AnnoMatrixLoader extends AnnoMatrix {
     return newAnnoMatrix;
   }
 
+  addObsContinuousColumn(colName, value) {
+    /*
+    Add a read-only continuous (float32) obs column, initialized from a
+    Float32Array of length nObs. Unlike addObsColumn (which forces a writable,
+    categorical user annotation), this registers a non-writable continuous
+    column so it shows up in the Continuous sidebar and is colorable like any
+    other continuous metadata (used for server-computed scores, e.g. ancestral
+    linkage).
+    */
+    if (
+      _getColumnSchema(this.schema, "obs", colName) ||
+      this._cache.obs.hasCol(colName)
+    ) {
+      throw new Error("column already exists");
+    }
+    if (!isArrayOrTypedArray(value) || value.constructor !== Float32Array) {
+      throw new Error("addObsContinuousColumn requires a Float32Array");
+    }
+    if (value.length !== this.nObs) {
+      throw new Error("Value array has incorrect length");
+    }
+
+    const newAnnoMatrix = this._clone();
+    newAnnoMatrix._cache.obs = this._cache.obs.withCol(colName, value.slice());
+    // `linkage: true` marks this as an ancestral-linkage column independently of
+    // its (user-renameable) name, so its diverging colormap and edit/delete menu
+    // survive a rename. The flag is carried through renameObsContinuousColumn.
+    const colSchema = {
+      name: colName,
+      type: "float32",
+      writable: false,
+      linkage: true,
+    };
+    newAnnoMatrix.schema = addObsAnnoColumn(this.schema, colName, colSchema);
+    return newAnnoMatrix;
+  }
+
+  dropObsContinuousColumn(col) {
+    /* drop a computed continuous column (added by addObsContinuousColumn).
+    Unlike dropObsColumn this does not require the column to be writable. */
+    const newAnnoMatrix = this._clone();
+    newAnnoMatrix._cache.obs = this._cache.obs.dropCol(col);
+    newAnnoMatrix.schema = removeObsAnnoColumn(this.schema, col);
+    return newAnnoMatrix;
+  }
+
+  renameObsContinuousColumn(oldCol, newCol) {
+    /* rename a computed continuous column by dropping and re-adding it with the
+    same values (read from cache — these columns are always fully cached). */
+    const value = this._cache.obs.hasCol(oldCol)
+      ? this._cache.obs.col(oldCol).asArray()
+      : undefined;
+    if (value === undefined) throw new Error("column data missing");
+    return this.dropObsContinuousColumn(oldCol).addObsContinuousColumn(
+      newCol,
+      value
+    );
+  }
+
   renameObsColumn(oldCol, newCol) {
     /*
     Rename the obs oldColName to newColName.  oldCol must be writable.

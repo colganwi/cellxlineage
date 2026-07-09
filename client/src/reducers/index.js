@@ -14,6 +14,7 @@ import differential from "./differential";
 import layoutChoice from "./layoutChoice";
 import lineageChoice from "./lineageChoice";
 import lineageData from "./lineageData";
+import ancestralLinkage from "./ancestralLinkage";
 import controls from "./controls";
 import annotations from "./annotations";
 import genesets from "./genesets";
@@ -36,6 +37,7 @@ const Reducer = undoable(
     ["layoutChoice", layoutChoice],
     ["lineageChoice", lineageChoice],
     ["lineageData", lineageData],
+    ["ancestralLinkage", ancestralLinkage],
     ["categoricalSelection", categoricalSelection],
     ["continuousSelection", continuousSelection],
     ["graphSelection", graphSelection],

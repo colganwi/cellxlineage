@@ -7,6 +7,8 @@ import * as globals from "../../globals";
 import actions from "../../actions";
 import { makeContinuousDimensionName } from "../../util/nameCreators";
 import HistogramHeader from "./header";
+import AncestralLinkageColumnMenu from "./ancestralLinkageColumnMenu";
+import { isAncestralLinkageColumn } from "../../util/stateManager/colorHelpers";
 import Histogram from "./histogram";
 import HistogramFooter from "./footer";
 import StillLoading from "./loading";
@@ -41,6 +43,7 @@ const HEIGHT_MINI = 15 - MARGIN_MINI.TOP - MARGIN_MINI.BOTTOM;
     isScatterplotYYaccessor: state.controls.scatterplotYYaccessor === field,
     continuousSelectionRange: state.continuousSelection[myName],
     isColorAccessor: state.colors.colorAccessor === field,
+    isLinkage: isAncestralLinkageColumn(state.annoMatrix?.schema, field),
   };
 })
 class HistogramBrush extends React.PureComponent {
@@ -90,53 +93,50 @@ class HistogramBrush extends React.PureComponent {
   };
 
   onBrushEnd = (selection, x) => () => {
-      const { dispatch, field, isObs, isUserDefined, isGeneSetSummary } =
-        this.props;
-      const minAllowedBrushSize = 10;
-      const smallAmountToAvoidInfiniteLoop = 0.1;
+    const { dispatch, field, isObs, isUserDefined, isGeneSetSummary } =
+      this.props;
+    const minAllowedBrushSize = 10;
+    const smallAmountToAvoidInfiniteLoop = 0.1;
 
-      // ignore programmatically generated events
-      if (!d3.event.sourceEvent) return;
-      // ignore cascading events, which are programmatically generated
-      if (d3.event.sourceEvent.sourceEvent) return;
+    // ignore programmatically generated events
+    if (!d3.event.sourceEvent) return;
+    // ignore cascading events, which are programmatically generated
+    if (d3.event.sourceEvent.sourceEvent) return;
 
-      let type;
-      let range = null;
-      if (d3.event.selection) {
-        type = "continuous metadata histogram end";
-        if (
-          d3.event.selection[1] - d3.event.selection[0] >
-          minAllowedBrushSize
-        ) {
-          range = [x(d3.event.selection[0]), x(d3.event.selection[1])];
-        } else {
-          /* the user selected range is too small and will be hidden #587, so take control of it procedurally */
-          /* https://stackoverflow.com/questions/12354729/d3-js-limit-size-of-brush */
-
-          const procedurallyResizedBrushWidth =
-            d3.event.selection[0] +
-            minAllowedBrushSize +
-            smallAmountToAvoidInfiniteLoop; //
-
-          range = [x(d3.event.selection[0]), x(procedurallyResizedBrushWidth)];
-        }
+    let type;
+    let range = null;
+    if (d3.event.selection) {
+      type = "continuous metadata histogram end";
+      if (d3.event.selection[1] - d3.event.selection[0] > minAllowedBrushSize) {
+        range = [x(d3.event.selection[0]), x(d3.event.selection[1])];
       } else {
-        type = "continuous metadata histogram cancel";
-      }
+        /* the user selected range is too small and will be hidden #587, so take control of it procedurally */
+        /* https://stackoverflow.com/questions/12354729/d3-js-limit-size-of-brush */
 
-      const query = this.createQuery();
-      const otherProps = {
-        selection: field,
-        continuousNamespace: {
-          isObs,
-          isUserDefined,
-          isGeneSetSummary,
-        },
-      };
-      dispatch(
-        actions.selectContinuousMetadataAction(type, query, range, otherProps)
-      );
+        const procedurallyResizedBrushWidth =
+          d3.event.selection[0] +
+          minAllowedBrushSize +
+          smallAmountToAvoidInfiniteLoop; //
+
+        range = [x(d3.event.selection[0]), x(procedurallyResizedBrushWidth)];
+      }
+    } else {
+      type = "continuous metadata histogram cancel";
+    }
+
+    const query = this.createQuery();
+    const otherProps = {
+      selection: field,
+      continuousNamespace: {
+        isObs,
+        isUserDefined,
+        isGeneSetSummary,
+      },
     };
+    dispatch(
+      actions.selectContinuousMetadataAction(type, query, range, otherProps)
+    );
+  };
 
   handleSetGeneAsScatterplotX = () => {
     const { dispatch, field } = this.props;
@@ -341,6 +341,7 @@ class HistogramBrush extends React.PureComponent {
       zebra,
       continuousSelectionRange,
       isObs,
+      isLinkage,
       mini,
       setGenes,
     } = this.props;
@@ -388,6 +389,11 @@ class HistogramBrush extends React.PureComponent {
                     fieldId={field}
                     isColorBy={isColorAccessor}
                     isObs={isObs}
+                    menu={
+                      isLinkage ? (
+                        <AncestralLinkageColumnMenu field={field} />
+                      ) : null
+                    }
                     onColorByClick={this.handleColorAction(dispatch)}
                     onRemoveClick={isUserDefined ? this.removeHistogram : null}
                     isScatterPlotX={isScatterplotXXaccessor}
@@ -413,6 +419,7 @@ class HistogramBrush extends React.PureComponent {
                   onBrushEnd={this.onBrushEnd}
                   margin={mini ? MARGIN_MINI : MARGIN}
                   isColorBy={isColorAccessor}
+                  isLinkage={isLinkage}
                   selectionRange={continuousSelectionRange}
                   mini={mini}
                 />

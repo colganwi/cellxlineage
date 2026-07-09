@@ -4,6 +4,7 @@ import * as d3 from "d3";
 
 import maybeScientific from "../../util/maybeScientific";
 import clamp from "../../util/clamp";
+import { linkageDivergingColor } from "../../util/stateManager/colorHelpers";
 
 const Histogram = ({
   field,
@@ -16,6 +17,7 @@ const Histogram = ({
   onBrushEnd,
   margin,
   isColorBy,
+  isLinkage,
   selectionRange,
   mini,
 }) => {
@@ -61,6 +63,20 @@ const Histogram = ({
         colorScale.domain()[0],
       ]); /* we flip this to make colors dark if high in the color scale */
 
+    // Ancestral-linkage columns are always shown with the diverging RdBu ramp
+    // (centered at 0), matching how the UMAP/tree color by them.
+    const [dMin, dMax] = x.domain();
+    const M = Math.max(Math.abs(dMin), Math.abs(dMax)) || 1;
+    const barFill = (d, i) => {
+      if (isLinkage) {
+        return linkageDivergingColor(
+          clamp((binStart(i) + M) / (2 * M), [0, 1])
+        );
+      }
+      if (isColorBy) return colorScale(histogramScale(binStart(i)));
+      return defaultBarColor;
+    };
+
     if (binWidth > 0) {
       /* BINS */
       container
@@ -73,12 +89,7 @@ const Histogram = ({
         .attr("y", (d) => y(d))
         .attr("width", (d, i) => x(binEnd(i)) - x(binStart(i)) - binPadding)
         .attr("height", (d) => y(0) - y(d))
-        .style(
-          "fill",
-          isColorBy
-            ? (d, i) => colorScale(histogramScale(binStart(i)))
-            : defaultBarColor
-        );
+        .style("fill", barFill);
     }
 
     if (!mini) {
@@ -139,7 +150,7 @@ const Histogram = ({
 
       setBrush({ brushX, brushXselection });
     }
-  }, [histogram, isColorBy]);
+  }, [histogram, isColorBy, isLinkage]);
 
   useEffect(() => {
     /*

@@ -6,6 +6,8 @@ import { interpolateCool } from "d3-scale-chromatic";
 import {
   createColorTable,
   createColorQuery,
+  isAncestralLinkageColumn,
+  linkageDivergingColor,
 } from "../../util/stateManager/colorHelpers";
 
 // create continuous color legend
@@ -145,9 +147,12 @@ class ContinuousLegend extends React.Component {
       if (colorAccessor && colorScale && range && domainMin < domainMax) {
         /* fragile! continuous range is 0 to 1, not [#fa4b2c, ...], make this a flag? */
         if (range()[0][0] !== "#") {
+          const interpolator = isAncestralLinkageColumn(schema, colorAccessor)
+            ? linkageDivergingColor
+            : interpolateCool;
           continuous(
             "#continuous_legend",
-            d3.scaleSequential(interpolateCool).domain(colorScale.domain()),
+            d3.scaleSequential(interpolator).domain(colorScale.domain()),
             colorAccessor
           );
         }

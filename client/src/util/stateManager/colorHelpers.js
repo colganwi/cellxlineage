@@ -2,11 +2,32 @@
 Helper functions for the embedded graph colors
 */
 import * as d3 from "d3";
-import { interpolateRainbow, interpolateCool } from "d3-scale-chromatic";
+import {
+  interpolateRainbow,
+  interpolateCool,
+  interpolateRdBu,
+} from "d3-scale-chromatic";
 import memoize from "memoize-one";
 import * as globals from "../../globals";
 import parseRGB from "../parseRGB";
 import { range } from "../range";
+
+// Continuous obs columns produced by the ancestral-linkage "selected" button are
+// normalized enrichment scores centered at 0, colored with the diverging ramp
+// (red = high) instead of the default sequential ramp. They are identified by a
+// `linkage: true` flag on their schema entry (set in addObsContinuousColumn), NOT
+// by name — so the identity survives a user rename.
+export function isAncestralLinkageColumn(schema, name) {
+  return !!schema?.annotations?.obsByName?.[name]?.linkage;
+}
+
+// Diverging ramp for ancestral linkage, keyed on the normalized value t in [0, 1]
+// (0 = lowest value, 1 = highest). Linkage values are negated server-side so that
+// closely-related cells/categories have HIGH values; red = high (hot), blue =
+// low. d3 interpolateRdBu runs red -> blue, so flip the argument (high -> red).
+export function linkageDivergingColor(t) {
+  return interpolateRdBu(1 - t);
+}
 
 /*
 given a color mode & accessor, generate an annoMatrix query that will
@@ -101,6 +122,13 @@ function _createColorTable(
     case "color by continuous metadata": {
       const col = colorByData.col(colorByAccessor);
       const { min, max } = col.summarize();
+      if (isAncestralLinkageColumn(schema, colorByAccessor)) {
+        return createColorsByContinuousMetadataDiverging(
+          col.asArray(),
+          min,
+          max
+        );
+      }
       return createColorsByContinuousMetadata(col.asArray(), min, max);
     }
     case "color by expression": {
@@ -219,4 +247,36 @@ function _createColorsByContinuousMetadata(data, min, max) {
 }
 export const createColorsByContinuousMetadata = memoize(
   _createColorsByContinuousMetadata
+);
+
+function _createColorsByContinuousMetadataDiverging(data, min, max) {
+  const colorBins = 100;
+  // Symmetric domain centered at 0 so value 0 maps to the white midpoint.
+  const M = Math.max(Math.abs(min), Math.abs(max)) || 1;
+  const scale = d3
+    .scaleLinear()
+    .domain([-M, M])
+    .range([colorBins - 1, 0])
+    .clamp(true);
+
+  /* pre-create colors: bin colorBins-1 = -M (red, more related), bin 0 = +M (blue) */
+  const colors = new Array(colorBins);
+  for (let i = 0; i < colorBins; i += 1) {
+    colors[i] = parseRGB(linkageDivergingColor(1 - i / (colorBins - 1)));
+  }
+
+  const nonFiniteColor = parseRGB(globals.nonFiniteCellColor);
+  const rgb = new Array(data.length);
+  for (let i = 0, len = data.length; i < len; i += 1) {
+    const val = data[i];
+    if (Number.isFinite(val)) {
+      rgb[i] = colors[Math.round(scale(val))];
+    } else {
+      rgb[i] = nonFiniteColor;
+    }
+  }
+  return { rgb, scale };
+}
+export const createColorsByContinuousMetadataDiverging = memoize(
+  _createColorsByContinuousMetadataDiverging
 );

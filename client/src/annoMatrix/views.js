@@ -49,6 +49,34 @@ class AnnoMatrixView extends AnnoMatrix {
     return newAnnoMatrix;
   }
 
+  addObsContinuousColumn(colName, value) {
+    // value is always base/full-obs length; the base stores it and this view
+    // slices it lazily on fetch (see AnnoMatrixRowSubsetView._doLoad).
+    const newAnnoMatrix = this._clone();
+    newAnnoMatrix.viewOf = this.viewOf.addObsContinuousColumn(colName, value);
+    newAnnoMatrix.schema = newAnnoMatrix.viewOf.schema;
+    return newAnnoMatrix;
+  }
+
+  dropObsContinuousColumn(col) {
+    const newAnnoMatrix = this._clone();
+    newAnnoMatrix.viewOf = this.viewOf.dropObsContinuousColumn(col);
+    newAnnoMatrix._cache.obs = this._cache.obs.dropCol(col);
+    newAnnoMatrix.schema = newAnnoMatrix.viewOf.schema;
+    return newAnnoMatrix;
+  }
+
+  renameObsContinuousColumn(oldCol, newCol) {
+    const newAnnoMatrix = this._clone();
+    newAnnoMatrix.viewOf = this.viewOf.renameObsContinuousColumn(
+      oldCol,
+      newCol
+    );
+    newAnnoMatrix._cache.obs = this._cache.obs.dropCol(oldCol);
+    newAnnoMatrix.schema = newAnnoMatrix.viewOf.schema;
+    return newAnnoMatrix;
+  }
+
   renameObsColumn(oldCol, newCol) {
     const newAnnoMatrix = this._clone();
     newAnnoMatrix.viewOf = this.viewOf.renameObsColumn(oldCol, newCol);

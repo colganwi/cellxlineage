@@ -416,6 +416,12 @@ class DataAdaptor(metaclass=ABCMeta):
     def lineage_to_fbs_matrix(self, tree_names=None, depth_key="depth", keep_obs=None):
         raise PrepareError("Lineage trees are only available for TreeData (.h5td) datasets.")
 
+    def ancestral_linkage_selected(self, selected, tree_names=None, depth_key="depth"):
+        raise PrepareError("Ancestral linkage is only available for TreeData (.h5td) datasets.")
+
+    def ancestral_linkage_pairwise(self, groupby, selected=None, tree_names=None, depth_key="depth"):
+        raise PrepareError("Ancestral linkage is only available for TreeData (.h5td) datasets.")
+
     def summarize_var(self, method, filter, query_hash):
         if method != "mean":
             raise UnsupportedSummaryMethod("Unknown gene set summary method.")

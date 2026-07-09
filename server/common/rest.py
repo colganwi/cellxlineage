@@ -348,6 +348,51 @@ def lineage_obs_put(request, data_adaptor):
     return _lineage_obs_response(request, data_adaptor, keep_obs=keep_obs)
 
 
+def ancestral_linkage_selected_post(request, data_adaptor):
+    # Target-mode ancestral linkage: distance from every cell to the nearest
+    # selected cell, returned as a per-cell array for a new continuous obs column.
+    body = request.get_json(silent=True) or {}
+    selected = body.get("selected", [])
+    tree_names = body.get("tree", None)
+    depth_key = body.get("depthKey", "depth")
+    try:
+        result = data_adaptor.ancestral_linkage_selected(selected, tree_names, depth_key)
+        return make_response(jsonify(result), HTTPStatus.OK, {"Content-Type": "application/json"})
+    except (KeyError, ValueError, DatasetAccessError) as e:
+        return abort_and_log(HTTPStatus.BAD_REQUEST, str(e), include_exc_info=True)
+    except PrepareError:
+        return abort_and_log(
+            HTTPStatus.NOT_IMPLEMENTED,
+            f"No lineage trees available {request.path}",
+            loglevel=logging.ERROR,
+            include_exc_info=True,
+        )
+
+
+def ancestral_linkage_pairwise_post(request, data_adaptor):
+    # Pairwise-mode ancestral linkage over a categorical obs column (optionally
+    # restricted to the current selection), returned as a clustered heatmap matrix.
+    body = request.get_json(silent=True) or {}
+    groupby = body.get("groupby", None)
+    selected = body.get("selected", None)
+    tree_names = body.get("tree", None)
+    depth_key = body.get("depthKey", "depth")
+    if not groupby:
+        return abort_and_log(HTTPStatus.BAD_REQUEST, "missing required parameter 'groupby'")
+    try:
+        result = data_adaptor.ancestral_linkage_pairwise(groupby, selected, tree_names, depth_key)
+        return make_response(jsonify(result), HTTPStatus.OK, {"Content-Type": "application/json"})
+    except (KeyError, ValueError, DatasetAccessError) as e:
+        return abort_and_log(HTTPStatus.BAD_REQUEST, str(e), include_exc_info=True)
+    except PrepareError:
+        return abort_and_log(
+            HTTPStatus.NOT_IMPLEMENTED,
+            f"No lineage trees available {request.path}",
+            loglevel=logging.ERROR,
+            include_exc_info=True,
+        )
+
+
 def genesets_get(request, data_adaptor):
     preferred_mimetype = request.accept_mimetypes.best_match(["application/json", "text/csv"])
     if preferred_mimetype not in ("application/json", "text/csv"):

@@ -45,6 +45,35 @@ export default class AnnoMatrixObsCrossfilter {
     return new AnnoMatrixObsCrossfilter(annoMatrix, obsCrossfilter);
   }
 
+  addObsContinuousColumn(colName, value) {
+    const annoMatrix = this.annoMatrix.addObsContinuousColumn(colName, value);
+    const obsCrossfilter = this.obsCrossfilter.setData(annoMatrix._cache.obs);
+    return new AnnoMatrixObsCrossfilter(annoMatrix, obsCrossfilter);
+  }
+
+  dropObsContinuousColumn(col) {
+    const annoMatrix = this.annoMatrix.dropObsContinuousColumn(col);
+    let { obsCrossfilter } = this;
+    const dimName = _dimensionName("obs", col);
+    if (obsCrossfilter.hasDimension(dimName)) {
+      obsCrossfilter = obsCrossfilter.delDimension(dimName);
+    }
+    return new AnnoMatrixObsCrossfilter(annoMatrix, obsCrossfilter);
+  }
+
+  renameObsContinuousColumn(oldCol, newCol) {
+    const annoMatrix = this.annoMatrix.renameObsContinuousColumn(
+      oldCol,
+      newCol
+    );
+    const oldDimName = _dimensionName("obs", oldCol);
+    let { obsCrossfilter } = this;
+    if (obsCrossfilter.hasDimension(oldDimName)) {
+      obsCrossfilter = obsCrossfilter.delDimension(oldDimName);
+    }
+    return new AnnoMatrixObsCrossfilter(annoMatrix, obsCrossfilter);
+  }
+
   dropObsColumn(col) {
     const annoMatrix = this.annoMatrix.dropObsColumn(col);
     let { obsCrossfilter } = this;
@@ -182,7 +211,10 @@ export default class AnnoMatrixObsCrossfilter {
 		*/
     const { annoMatrix } = this;
     const currentDims = this.obsCrossfilter.dimensionNames();
-    const obsCrossfilter = currentDims.reduce((xfltr, dim) => xfltr.select(dim, { mode: "all" }), this.obsCrossfilter);
+    const obsCrossfilter = currentDims.reduce(
+      (xfltr, dim) => xfltr.select(dim, { mode: "all" }),
+      this.obsCrossfilter
+    );
     return new AnnoMatrixObsCrossfilter(annoMatrix, obsCrossfilter);
   }
 

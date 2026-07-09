@@ -11,6 +11,7 @@ import * as annoActions from "./annotation";
 import * as viewActions from "./viewStack";
 import * as embActions from "./embedding";
 import * as lineageActions from "./lineage";
+import * as ancestralLinkageActions from "./ancestralLinkage";
 import * as genesetActions from "./geneset";
 
 function setGlobalConfig(config) {
@@ -275,6 +276,18 @@ export default {
   lineageTreeChoiceAction: lineageActions.lineageTreeChoiceAction,
   lineageDepthKeyChoiceAction: lineageActions.lineageDepthKeyChoiceAction,
   lineageRectSelectAction: lineageActions.lineageRectSelectAction,
+  ancestralLinkageSelectedAction:
+    ancestralLinkageActions.ancestralLinkageSelectedAction,
+  ancestralLinkagePairwiseAction:
+    ancestralLinkageActions.ancestralLinkagePairwiseAction,
+  ancestralLinkageRemoveColumnAction:
+    ancestralLinkageActions.ancestralLinkageRemoveColumnAction,
+  ancestralLinkageRenameColumnAction:
+    ancestralLinkageActions.ancestralLinkageRenameColumnAction,
+  ancestralLinkageToggleMinimizeAction:
+    ancestralLinkageActions.ancestralLinkageToggleMinimizeAction,
+  ancestralLinkageCloseAction:
+    ancestralLinkageActions.ancestralLinkageCloseAction,
   setCellSetFromSelection: selnActions.setCellSetFromSelection,
   genesetDelete: genesetActions.genesetDelete,
   genesetAddGenes: genesetActions.genesetAddGenes,

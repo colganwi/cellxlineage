@@ -14,6 +14,7 @@ const HistogramHeader = React.memo(
     onScatterPlotXClick,
     onScatterPlotYClick,
     isObs,
+    menu,
   }) => {
     /*
         Render the toolbar for the histogram.  Props:
@@ -78,6 +79,7 @@ const HistogramHeader = React.memo(
             remove
           </Button>
         ) : null}
+        {menu ?? null}
         <Tooltip
           content="Use as color scale"
           position="bottom"

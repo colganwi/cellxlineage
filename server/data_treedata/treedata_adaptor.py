@@ -1,7 +1,10 @@
 import importlib.metadata
 import struct
+import uuid
+import weakref
 from collections import OrderedDict, deque
 
+import networkx as nx
 import numpy as np
 import pandas as pd
 import treedata as td
@@ -16,6 +19,10 @@ class TreedataAdaptor(AnndataAdaptor):
     # the data is read-only, so their framed FBS is cached. Bounded because a
     # single full layout can be large (tens of MB at >1M cells).
     _LINEAGE_CACHE_MAX = 16
+
+    # Pairwise ancestral linkage only includes categories with at least this many
+    # cells (pycea's min_size); smaller groups give noisy linkage estimates.
+    _LINKAGE_MIN_SIZE = 20
 
     def get_name(self):
         return "cellxlineage treedata adaptor version"
@@ -58,6 +65,10 @@ class TreedataAdaptor(AnndataAdaptor):
 
         # LRU cache of framed FBS for full-tree (no-subset) layouts.
         self._lineage_layout_cache = OrderedDict()
+
+        # Per-tree record of which depth keys have been annotated (see
+        # _ensure_depth), so topological "depth" isn't recomputed every request.
+        self._depth_ensured = weakref.WeakKeyDictionary()
 
     # ------------------------------------------------------------------ #
     # Lineage tree support                                               #
@@ -453,3 +464,156 @@ class TreedataAdaptor(AnndataAdaptor):
             while len(self._lineage_layout_cache) > self._LINEAGE_CACHE_MAX:
                 self._lineage_layout_cache.popitem(last=False)
         return result
+
+    # ------------------------------------------------------------------ #
+    # Ancestral linkage (pycea.tl.ancestral_linkage, metric="path")      #
+    # ------------------------------------------------------------------ #
+    # The compute is vendored under server/common/compute/ancestral_linkage
+    # (a trimmed copy of pycea's compute chain — no matplotlib/scanpy). Both
+    # entry points build a lightweight, X-free TreeData indexed by the ORIGINAL
+    # obs names (self.data.obs was re-indexed to a RangeIndex by
+    # _alias_annotation_names, so it no longer matches the tree leaf names) that
+    # shares the existing tree graphs. self.data itself is never mutated.
+
+    def _ensure_depth(self, tree, depth_key):
+        """Guarantee every node carries `depth_key`. For "depth" (topological
+        depth from the root, hops) it is computed and set in place once per tree,
+        matching the layout's own definition and pycea.pp.add_depth. Other keys are
+        assumed stored on all nodes (validated downstream by check_tree_has_key)."""
+        if depth_key != "depth":
+            return
+        done = self._depth_ensured.setdefault(tree, set())
+        if depth_key in done:
+            return
+        root = self._tree_root(tree)
+        depths = nx.single_source_shortest_path_length(tree, root)
+        nx.set_node_attributes(tree, depths, "depth")
+        done.add(depth_key)
+
+    def _build_linkage_tdata(self, groupby, series, tree_names, depth_key):
+        """Lightweight TreeData for the linkage compute.
+
+        `series` holds the groupby values in full obs order (the adaptor's obs
+        row order). Returns (tdata, tree_keys); `tdata` is indexed by the
+        original obs names and shares the selected tree graphs.
+        """
+        trees = self._select_trees(tree_names)
+        if len(trees) > 1 and bool(getattr(self.data, "has_overlap", False)):
+            raise DatasetAccessError(
+                "Cannot compute linkage across multiple trees when trees share observations; select one tree."
+            )
+        for tree in trees.values():
+            self._ensure_depth(tree, depth_key)
+        obs_index = self.get_obs_index()
+        obs = pd.DataFrame(index=obs_index)
+        obs[groupby] = pd.Series(np.asarray(series), index=obs_index)
+        tdata = td.TreeData(
+            obs=obs,
+            obst=dict(trees),
+            alignment=getattr(self.data, "alignment", "leaves"),
+            allow_overlap=bool(getattr(self.data, "allow_overlap", True)),
+        )
+        return tdata, list(trees.keys())
+
+    def _selected_names(self, selected):
+        """Map selected obs row positions (full obs index, as the client sends
+        them) to original obs names."""
+        obs_index = self.get_obs_index()
+        positions = np.asarray(selected, dtype=np.int64)
+        if positions.size and (positions.min() < 0 or positions.max() >= len(obs_index)):
+            raise DatasetAccessError("Selected obs positions are out of range.")
+        return obs_index[positions]
+
+    def ancestral_linkage_selected(self, selected, tree_names=None, depth_key="depth"):
+        """Target-mode linkage: per-cell tree distance (path) to the nearest
+        selected cell. Returns {"values": [...]} in full obs order (NaN -> None),
+        suitable for a new continuous obs column on the client."""
+        from server.common.compute.ancestral_linkage import ancestral_linkage
+
+        depth_key = depth_key or "depth"
+        names = self._selected_names(selected)
+        if len(names) == 0:
+            raise ValueError("Select one or more cells before running selected linkage.")
+
+        obs_index = self.get_obs_index()
+        is_selected = obs_index.isin(set(names))
+        series = np.where(is_selected, "selected", "other")
+        tdata, tree_keys = self._build_linkage_tdata("_cxl_group", series, tree_names, depth_key)
+
+        ancestral_linkage(
+            tdata,
+            groupby="_cxl_group",
+            target="selected",
+            metric="path",
+            depth_key=depth_key,
+            tree=tree_keys,
+            normalize=True,
+        )
+        # Negate so that closely-related cells (small normalized distance) become
+        # high values — colored red (hot). The selected target cells themselves are
+        # pinned to the maximum so they read as the hottest of all.
+        values = -tdata.obs["selected_linkage"].to_numpy(dtype=float)
+        finite = values[np.isfinite(values)]
+        if finite.size:
+            values[np.asarray(is_selected) & np.isfinite(values)] = float(np.max(finite))
+        return {"values": [None if not np.isfinite(v) else float(v) for v in values]}
+
+    def ancestral_linkage_pairwise(self, groupby, selected=None, tree_names=None, depth_key="depth"):
+        """Pairwise-mode linkage over a categorical obs column, optionally
+        restricted to the selected cells (which auto-prunes the trees). Returns
+        the clustered, symmetrized normalized-enrichment matrix as
+        {"labels": [...], "matrix": [[...]], "vmin": v, "vmax": v}."""
+        from server.common.compute.ancestral_linkage import ancestral_linkage, cluster_order
+
+        depth_key = depth_key or "depth"
+        if groupby not in self.data.obs.columns:
+            raise ValueError(f"'{groupby}' is not an obs column.")
+        col = self.data.obs[groupby]
+        if not (isinstance(col.dtype, pd.CategoricalDtype) or col.dtype.kind in ("O", "b")):
+            raise ValueError(f"'{groupby}' is not a categorical column; pick a categorical color-by.")
+
+        tdata, tree_keys = self._build_linkage_tdata(groupby, col.to_numpy(), tree_names, depth_key)
+        if selected is not None and len(selected) > 0:
+            names = self._selected_names(selected)
+            tdata = tdata[list(names)]
+
+        ancestral_linkage(
+            tdata,
+            groupby=groupby,
+            metric="path",
+            normalize=True,
+            symmetrize="mean",
+            depth_key=depth_key,
+            tree=tree_keys,
+            # Only include categories with at least this many cells; smaller
+            # groups give noisy linkage estimates.
+            min_size=self._LINKAGE_MIN_SIZE,
+        )
+        matrix = tdata.uns[f"{groupby}_linkage"]
+        if matrix.shape[0] < 2:
+            raise ValueError(
+                f"Need at least two categories with ≥{self._LINKAGE_MIN_SIZE} cells to compute pairwise linkage."
+            )
+
+        # Cluster on the raw (path = dissimilarity) matrix, THEN negate for display
+        # so that closely-related categories (small distance) become high values —
+        # colored red (hot). Negating after clustering keeps the ordering intact.
+        order = cluster_order(matrix, method="average", negate=False)
+        arr = -matrix.iloc[order, order].to_numpy(dtype=float)
+        labels = [str(x) for x in matrix.index[order]]
+
+        # Diverging scale centered at 0 from the largest abs off-diagonal value
+        # (mirrors pycea.pl.ancestral_linkage's TwoSlopeNorm default).
+        off = arr.copy()
+        np.fill_diagonal(off, np.nan)
+        finite = off[np.isfinite(off)]
+        span = float(np.nanmax(np.abs(finite))) if finite.size else 1.0
+        if not np.isfinite(span) or span == 0:
+            span = 1.0
+
+        return {
+            "labels": labels,
+            "matrix": [[None if not np.isfinite(v) else float(v) for v in row] for row in arr],
+            "vmin": -span,
+            "vmax": span,
+        }

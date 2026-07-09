@@ -186,6 +186,20 @@ class LineageObsAPI(Resource):
         return common_rest.lineage_obs_put(request, data_adaptor)
 
 
+class AncestralLinkageSelectedAPI(Resource):
+    @cache_control(no_store=True)
+    @rest_get_data_adaptor
+    def post(self, data_adaptor):
+        return common_rest.ancestral_linkage_selected_post(request, data_adaptor)
+
+
+class AncestralLinkagePairwiseAPI(Resource):
+    @cache_control(no_store=True)
+    @rest_get_data_adaptor
+    def post(self, data_adaptor):
+        return common_rest.ancestral_linkage_pairwise_post(request, data_adaptor)
+
+
 class GenesetsAPI(Resource):
     @cache_control(public=True, max_age=ONE_WEEK)
     @rest_get_data_adaptor
@@ -243,6 +257,8 @@ def get_api_dataroot_resources(bp_dataroot):
     add_resource(LayoutObsAPI, "/layout/obs")
     add_resource(LineageMetaAPI, "/lineage/meta")
     add_resource(LineageObsAPI, "/lineage/obs")
+    add_resource(AncestralLinkageSelectedAPI, "/lineage/ancestral-linkage/selected")
+    add_resource(AncestralLinkagePairwiseAPI, "/lineage/ancestral-linkage/pairwise")
     return api
 
 

@@ -4,8 +4,15 @@ import _regl from "regl";
 import { mat3 } from "gl-matrix";
 import memoize from "memoize-one";
 import Async from "react-async";
+import {
+  AnchorButton,
+  ButtonGroup,
+  Tooltip,
+  Position,
+} from "@blueprintjs/core";
 
 import * as globals from "../../globals";
+import actions from "../../actions";
 import _drawBranches from "./drawBranchesRegl";
 import _drawAnnotation from "./drawAnnotationRegl";
 import _drawNodes from "./drawNodesRegl";
@@ -39,6 +46,7 @@ function createProjectionTF(viewportWidth, viewportHeight) {
   genesets: state.genesets.genesets,
   lineageData: state.lineageData,
   lineageChoice: state.lineageChoice,
+  ancestralLinkage: state.ancestralLinkage,
   pointDilation: state.pointDilation,
   graphInteractionMode: state.controls.graphInteractionMode,
 }))
@@ -497,10 +505,23 @@ class Lineage extends React.PureComponent {
       genesets,
       lineageData,
       lineageChoice,
+      ancestralLinkage,
       pointDilation,
       graphInteractionMode,
     } = this.props;
     const { regl } = this.state;
+
+    // Ancestral-linkage buttons (top-left of the tree pane).
+    // "selected" needs a proper subset of cells selected as the target;
+    // "pairwise" needs a categorical color-by active as the groupby.
+    const nSelected = crossfilter?.countSelected?.() ?? 0;
+    const nObs = annoMatrix?.nObs ?? 0;
+    const hasSelection = nSelected > 0 && nSelected < nObs;
+    const hasCategoricalColorBy =
+      colors?.colorMode === "color by categorical metadata" &&
+      !!colors?.colorAccessor;
+    const selectedLoading = ancestralLinkage?.selectedLoading;
+    const pairwiseLoading = ancestralLinkage?.pairwiseLoading;
 
     // No trees in this dataset (plain AnnData) → keep the sidebar empty.
     if (!lineageChoice?.available?.length) {
@@ -530,6 +551,45 @@ class Lineage extends React.PureComponent {
           ref={this.setCanvasArea}
           style={{ flex: 1, position: "relative", minHeight: 0 }}
         >
+          <ButtonGroup
+            style={{
+              position: "absolute",
+              top: 8,
+              left: 8,
+              zIndex: 10,
+            }}
+          >
+            <Tooltip
+              content="Ancestral linkage to selected cells"
+              position={Position.BOTTOM}
+            >
+              <AnchorButton
+                type="button"
+                data-testid="ancestral-linkage-selected"
+                icon="route"
+                loading={selectedLoading}
+                disabled={!hasSelection}
+                onClick={() =>
+                  dispatch(actions.ancestralLinkageSelectedAction())
+                }
+              />
+            </Tooltip>
+            <Tooltip
+              content="Pairwise ancestral linkage between selected categories"
+              position={Position.BOTTOM}
+            >
+              <AnchorButton
+                type="button"
+                data-testid="ancestral-linkage-pairwise"
+                icon="heat-grid"
+                loading={pairwiseLoading}
+                disabled={!hasCategoricalColorBy}
+                onClick={() =>
+                  dispatch(actions.ancestralLinkagePairwiseAction())
+                }
+              />
+            </Tooltip>
+          </ButtonGroup>
           <canvas
             data-testid="lineage-canvas"
             style={{

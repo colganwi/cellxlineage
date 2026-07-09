@@ -251,6 +251,78 @@ describe("AnnoMatrix", () => {
     });
   });
 
+  describe("addObsContinuousColumn", () => {
+    /* server-computed read-only continuous column (e.g. ancestral linkage) */
+    test("adds a non-writable float32 column on the base", async () => {
+      const base = annoMatrix.base();
+      const values = new Float32Array(base.nObs);
+      for (let i = 0; i < base.nObs; i += 1) values[i] = i * 0.5;
+
+      const am1 = base.addObsContinuousColumn("linkage", values);
+      const colSchema = am1.getColumnSchema("obs", "linkage");
+      expect(colSchema.type).toEqual("float32");
+      expect(colSchema.writable).toEqual(false);
+      expect(colSchema.linkage).toEqual(true);
+
+      const df = await am1.fetch("obs", "linkage");
+      expect(df).toBeInstanceOf(Dataframe);
+      expect(df.col("linkage").asArray()).toEqual(values);
+    });
+
+    test("view slices the base column to its rows", async () => {
+      const base = annoMatrix.base();
+      const values = new Float32Array(base.nObs);
+      for (let i = 0; i < base.nObs; i += 1) values[i] = i;
+
+      const rows = [10, 0, 7, 3];
+      const view = isubset(base, rows);
+      const am1 = view.addObsContinuousColumn("linkage", values);
+      const df = await am1.fetch("obs", "linkage");
+      expect(df).toHaveLength(rows.length);
+      expect(Array.from(df.col("linkage").asArray())).toEqual(rows);
+    });
+
+    test("rejects a wrong-length or wrong-type array", () => {
+      const base = annoMatrix.base();
+      expect(() =>
+        base.addObsContinuousColumn("bad", new Float32Array(3))
+      ).toThrow();
+      expect(() =>
+        base.addObsContinuousColumn("bad", new Float64Array(base.nObs))
+      ).toThrow();
+    });
+
+    test("drop removes the column (no writable requirement)", async () => {
+      const base = annoMatrix.base();
+      const values = new Float32Array(base.nObs).fill(1);
+      const am1 = base.addObsContinuousColumn("linkage", values);
+      expect(am1.getMatrixColumns("obs")).toContain("linkage");
+      const am2 = am1.dropObsContinuousColumn("linkage");
+      expect(am2.getMatrixColumns("obs")).not.toContain("linkage");
+    });
+
+    test("rename preserves values under a new name", async () => {
+      const base = annoMatrix.base();
+      const values = new Float32Array(base.nObs);
+      for (let i = 0; i < base.nObs; i += 1) values[i] = i * 2;
+      const am1 = base.addObsContinuousColumn("Pop1 ancestral linkage", values);
+      const am2 = am1.renameObsContinuousColumn(
+        "Pop1 ancestral linkage",
+        "Pop2 ancestral linkage"
+      );
+      expect(am2.getMatrixColumns("obs")).not.toContain(
+        "Pop1 ancestral linkage"
+      );
+      expect(am2.getMatrixColumns("obs")).toContain("Pop2 ancestral linkage");
+      const df = await am2.fetch("obs", "Pop2 ancestral linkage");
+      expect(df.col("Pop2 ancestral linkage").asArray()).toEqual(values);
+      // the linkage flag survives the rename (identity is not name-based)
+      expect(
+        am2.getColumnSchema("obs", "Pop2 ancestral linkage").linkage
+      ).toEqual(true);
+    });
+  });
+
   describe("setObsColumnValues", () => {
     async function addSetDrop(base) {
       /* add column */
