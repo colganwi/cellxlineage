@@ -107,7 +107,7 @@ def start_test_server(command_line_args=[], app_config=None, env=None):
     yaml config file, which this server will read and parse.
     """
 
-    command = ["cellxgene", "--no-upgrade-check", "launch", "--verbose"]
+    command = ["cellxlineage", "--no-upgrade-check", "launch", "--verbose"]
     if "-p" in command_line_args:
         port = int(command_line_args[command_line_args.index("-p") + 1])
     elif "--port" in command_line_args:
