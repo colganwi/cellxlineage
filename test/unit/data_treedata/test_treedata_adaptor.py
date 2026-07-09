@@ -1,15 +1,79 @@
+import os
+import shutil
 import struct
+import tempfile
 import unittest
 
+import networkx as nx
 import numpy as np
+import pandas as pd
+import treedata as td
 
 from server.common.config.app_config import AppConfig
 from server.common.fbs.matrix import decode_matrix_fbs
 from server.common.utils.data_locator import DataLocator
 from server.data_treedata.treedata_adaptor import TreedataAdaptor
-from test import PROJECT_ROOT
 
-EXAMPLE = f"{PROJECT_ROOT}/dev/example.h5td"
+# A small synthetic .h5td built at test time (the real dev/example.h5td is a
+# gitignored 97MB dataset not available in CI). It mirrors the properties the
+# tests rely on: two non-overlapping leaf-aligned trees named "E7.5-R1-C1" /
+# "E7.5-R1-C2", numeric "time"/"id" on every node, a "cell_type" categorical with
+# two large categories (A, B) and two small ones (C, D < the min_size cutoff), a
+# continuous "total_counts" column, and a UMAP embedding.
+EXAMPLE = None
+_TMPDIR = None
+
+
+def _build_tree(tree_name, n_levels, leaf_start, uid):
+    g = nx.DiGraph()
+    root = f"{tree_name}_i{uid[0]}"
+    uid[0] += 1
+    g.add_node(root, time=0.0, id=float(uid[0]))
+    frontier = [(root, 0)]
+    while frontier:
+        node, level = frontier.pop(0)
+        if level == n_levels:
+            continue
+        for _ in range(2):
+            uid[0] += 1
+            name = f"{tree_name}_i{uid[0]}"
+            g.add_node(name, time=float(level + 1), id=float(uid[0]))
+            g.add_edge(node, name)
+            frontier.append((name, level + 1))
+    leaf_nodes = [n for n in nx.dfs_postorder_nodes(g, root) if g.out_degree(n) == 0]
+    mapping = {ln: f"cell{leaf_start + i}" for i, ln in enumerate(leaf_nodes)}
+    return nx.relabel_nodes(g, mapping), [f"cell{leaf_start + i}" for i in range(len(leaf_nodes))]
+
+
+def setUpModule():
+    global EXAMPLE, _TMPDIR
+    _TMPDIR = tempfile.mkdtemp(prefix="cxl_treedata_test_")
+    EXAMPLE = os.path.join(_TMPDIR, "example.h5td")
+    uid = [0]
+    g1, leaves1 = _build_tree("E7.5-R1-C1", 6, 0, uid)
+    g2, leaves2 = _build_tree("E7.5-R1-C2", 6, len(leaves1), uid)
+    all_leaves = leaves1 + leaves2
+    n = len(all_leaves)
+    cats = ["A"] * 50 + ["B"] * 50 + ["C"] * 15 + ["D"] * 13
+    rng = np.random.RandomState(0)
+    obs = pd.DataFrame(
+        {"cell_type": pd.Categorical(cats), "total_counts": rng.rand(n).astype("float64")},
+        index=pd.Index(all_leaves),
+    )
+    tdata = td.TreeData(
+        X=rng.rand(n, 5).astype("float32"),
+        obs=obs,
+        var=pd.DataFrame(index=[f"g{i}" for i in range(5)]),
+        obsm={"X_umap": rng.rand(n, 2).astype("float32")},
+        obst={"E7.5-R1-C1": g1, "E7.5-R1-C2": g2},
+        alignment="leaves",
+    )
+    tdata.write_h5td(EXAMPLE)
+
+
+def tearDownModule():
+    if _TMPDIR:
+        shutil.rmtree(_TMPDIR, ignore_errors=True)
 
 
 def unframe_matrices(fbs):
@@ -176,8 +240,6 @@ class TreedataAdaptorAncestralLinkageTest(unittest.TestCase):
         # Under an active subset (keep_obs = one tree's cells), the trees are pruned
         # to that view: cells outside it are null, and the kept cells' scores match
         # the full computation (target linkage is within-tree).
-        import numpy as np
-
         trees = meta_trees(self.data)
         obs_index = self.data.get_obs_index()
         tree = self.data.data.obst["E7.5-R1-C1"]
@@ -215,12 +277,13 @@ class TreedataAdaptorAncestralLinkageTest(unittest.TestCase):
         self.assertEqual(self._snapshot(), before)
 
     def test_pairwise_min_size_drops_small_categories(self):
-        # cell_type has categories with <20 cells (Notochord=19, PGC=3, ...) which
-        # must be excluded by the min_size filter.
+        # cell_type has small categories (C=15, D=13, both < the min_size cutoff)
+        # that must be excluded, leaving the two large ones (A, B).
         trees = meta_trees(self.data)
         result = self.data.ancestral_linkage_pairwise("cell_type", None, trees, "time")
-        small = {"Notochord", "Extraembryonic ectoderm", "Primordial germ cell"}
-        self.assertFalse(small & set(result["labels"]))
+        labels = set(result["labels"])
+        self.assertFalse({"C", "D"} & labels)
+        self.assertEqual(labels, {"A", "B"})
 
     def test_pairwise_subset_restricts_categories(self):
         trees = meta_trees(self.data)

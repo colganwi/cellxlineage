@@ -91,7 +91,9 @@ jobs:
           fail_ci_if_error: false
 
   smoke-tests:
-    runs-on: macos-latest
+    # macos-13 is the last Intel runner; the pinned puppeteer's bundled Chromium
+    # (x86, r901912) fails to launch on the ARM macos-latest runners.
+    runs-on: macos-13
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4

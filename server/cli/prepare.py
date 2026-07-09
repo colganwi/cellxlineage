@@ -89,7 +89,8 @@ def prepare(
         import scanpy as sc
     except ImportError:
         raise click.ClickException(
-            "[cellxlineage] cellxlineage prepare has not been installed. Please run `pip install 'cellxlineage[prepare]'` "
+            "[cellxlineage] cellxlineage prepare has not been installed. "
+            "Please run `pip install 'cellxlineage[prepare]'` "
             "to install the necessary requirements."
         )
 
