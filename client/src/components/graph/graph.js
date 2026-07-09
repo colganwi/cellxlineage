@@ -145,11 +145,12 @@ class Graph extends React.Component {
   );
 
   computeHighlightFlags = memoize(
-    (nObs, pointDilationData, pointDilationLabel) => {
+    (nObs, pointDilationData, pointDilationLabels) => {
       const flags = new Float32Array(nObs);
-      if (pointDilationData) {
+      if (pointDilationData && pointDilationLabels?.length) {
+        const labelSet = new Set(pointDilationLabels);
         for (let i = 0, len = flags.length; i < len; i += 1) {
-          if (pointDilationData[i] === pointDilationLabel) {
+          if (labelSet.has(pointDilationData[i])) {
             flags[i] = flagHighlight;
           }
         }
@@ -172,7 +173,7 @@ class Graph extends React.Component {
   });
 
   computePointFlags = memoize(
-    (crossfilter, colorByData, pointDilationData, pointDilationLabel) => {
+    (crossfilter, colorByData, pointDilationData, pointDilationLabels) => {
       /*
       We communicate with the shader using three flags:
       - isNaN -- the value is a NaN. Only makes sense when we have a colorAccessor
@@ -197,7 +198,7 @@ class Graph extends React.Component {
       const highlightFlags = this.computeHighlightFlags(
         nObs,
         pointDilationData,
-        pointDilationLabel
+        pointDilationLabels
       );
       const colorByFlags = this.computeColorByFlags(nObs, colorByData);
 
@@ -543,7 +544,7 @@ class Graph extends React.Component {
     const colorByData = colorDf?.col(colorAccessor)?.asArray();
     const {
       metadataField: pointDilationCategory,
-      categoryField: pointDilationLabel,
+      categoryFields: pointDilationLabels,
     } = pointDilation;
     const pointDilationData = pointDilationDf
       ?.col(pointDilationCategory)
@@ -552,7 +553,7 @@ class Graph extends React.Component {
       crossfilter,
       colorByData,
       pointDilationData,
-      pointDilationLabel
+      pointDilationLabels
     );
 
     const { width, height } = viewport;

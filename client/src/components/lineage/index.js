@@ -6,6 +6,7 @@ import memoize from "memoize-one";
 import Async from "react-async";
 import {
   AnchorButton,
+  Button,
   ButtonGroup,
   Tooltip,
   Position,
@@ -33,6 +34,11 @@ const MARGIN = { left: 6, right: 6, top: 6, bottom: 6 };
 const STRIP_WIDTH = 21; // annotation bar width, px
 const STRIP_GAP = 6; // gap between tree and bar, px
 const HIGHLIGHT_SCALE = 2; // hovered-category leaves widen by this factor
+// Extra right-edge reservation so the widened highlight clears the vertical
+// scrollbar (TreeScrollbar sits in the rightmost ~10px: right:2 + width:8).
+const SCROLLBAR_CLEARANCE = 8;
+// Max zoom-in shows at least this many leaves (only caps trees with more leaves).
+const MAX_ZOOM_LEAVES = 100;
 
 function createProjectionTF(viewportWidth, viewportHeight) {
   const m = mat3.create();
@@ -162,14 +168,16 @@ class Lineage extends React.PureComponent {
     return selected;
   });
 
-  /* per-item highlight flag: 1 when the leaf's cell is in the hovered category
-     (mirrors the UMAP point-dilation highlight in the left sidebar) */
-  computeHighlight = memoize((dilationData, label, obsIdx) => {
+  /* per-item highlight flag: 1 when the leaf's cell is in one of the hovered
+     categories (mirrors the UMAP point-dilation highlight; one category for a
+     left-sidebar hover, two for a pairwise linkage heatmap cell hover) */
+  computeHighlight = memoize((dilationData, labels, obsIdx) => {
     const highlight = new Float32Array(obsIdx.length);
-    if (dilationData) {
+    if (dilationData && labels?.length) {
+      const labelSet = new Set(labels);
       for (let i = 0, n = obsIdx.length; i < n; i += 1) {
         const o = obsIdx[i];
-        if (o >= 0 && dilationData[o] === label) highlight[i] = 1;
+        if (o >= 0 && labelSet.has(dilationData[o])) highlight[i] = 1;
       }
     }
     return highlight;
@@ -259,8 +267,9 @@ class Lineage extends React.PureComponent {
     );
     const { rgb } = colorTable;
 
-    // Cell metadata column + value being hovered in the left sidebar, if any.
-    const { metadataField, categoryField } = pointDilation ?? {};
+    // Cell metadata column + value(s) being hovered (left-sidebar category, or a
+    // pairwise linkage heatmap cell → two categories), if any.
+    const { metadataField, categoryFields } = pointDilation ?? {};
     let dilationData = null;
     if (metadataField) {
       const df = await annoMatrix.fetch("obs", metadataField);
@@ -284,7 +293,7 @@ class Lineage extends React.PureComponent {
       leafSelected: this.computeSelected(crossfilter, leafObs),
       leafHighlight: this.computeHighlight(
         dilationData,
-        categoryField,
+        categoryFields,
         leafObs
       ),
     };
@@ -330,6 +339,12 @@ class Lineage extends React.PureComponent {
         yTop: MARGIN.top,
         yBot: this.canvasSize.height - MARGIN.bottom,
       }),
+      // Cap max zoom so at most MAX_ZOOM_LEAVES leaves fill the pane on large
+      // trees; smaller trees keep the default fine zoom.
+      getMinRange: () => {
+        const n = this.renderCache?.nLeaves;
+        return n && n > MAX_ZOOM_LEAVES ? MAX_ZOOM_LEAVES / n : null;
+      },
     });
   }
 
@@ -427,7 +442,13 @@ class Lineage extends React.PureComponent {
     // widen (HIGHLIGHT_SCALE×) without spilling off the canvas.
     const growRoomPx = cache.hasNodes ? 0 : STRIP_WIDTH * (HIGHLIGHT_SCALE - 1);
     const treeLeft = MARGIN.left;
-    const treeRight = width - MARGIN.right - growRoomPx - gapPx - stripWidthPx;
+    const treeRight =
+      width -
+      MARGIN.right -
+      SCROLLBAR_CLEARANCE -
+      growRoomPx -
+      gapPx -
+      stripWidthPx;
     const xM = (treeRight - treeLeft) / (xMax - xMin);
     const xB = treeLeft - xM * xMin;
     const yTop = MARGIN.top;
@@ -627,6 +648,24 @@ class Lineage extends React.PureComponent {
             top={MARGIN.top}
             bottom={MARGIN.bottom}
           />
+          {lineageData?.loading ? (
+            <div
+              style={{
+                position: "absolute",
+                top: "50%",
+                left: "50%",
+                transform: "translate(-50%, -50%)",
+                display: "flex",
+                alignItems: "center",
+                fontWeight: 500,
+                pointerEvents: "none",
+                zIndex: 5,
+              }}
+            >
+              <Button minimal loading intent="primary" />
+              <span style={{ fontStyle: "italic" }}>Loading trees</span>
+            </div>
+          ) : null}
         </div>
         <LineageChoices
           dispatch={dispatch}

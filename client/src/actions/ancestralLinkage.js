@@ -60,11 +60,17 @@ export const ancestralLinkageSelectedAction =
       return;
     }
     const selected = Array.from(obsCrossfilter.allSelectedLabels());
+    // When a subset is active, send the view's obs positions so the server prunes
+    // the trees to the visible cells (shared/cached with the tree-view subset and
+    // the pairwise call), rather than computing over the full trees.
+    const isSubset = annoMatrix.nObs < annoMatrix.schema.dataframe.nObs;
+    const keepObs = isSubset ? Array.from(annoMatrix.rowIndex.labels()) : null;
 
     dispatch({ type: "ancestral linkage: selected start" });
     try {
       const { values } = await _postJSON("lineage/ancestral-linkage/selected", {
         selected,
+        keepObs,
         tree: lineageChoice?.current ?? null,
         depthKey: lineageChoice?.currentDepthKey ?? "depth",
       });

@@ -30,7 +30,7 @@ const CBAR_LABELS = 34;
 
 class AncestralLinkageHeatmap extends React.PureComponent {
   renderHeatmap() {
-    const { matrix, labels, vmin, vmax } = this.props;
+    const { matrix, labels, vmin, vmax, groupby, dispatch } = this.props;
     if (!matrix || !labels || labels.length === 0) return null;
     const n = labels.length;
     const grid = n * CELL;
@@ -38,6 +38,16 @@ class AncestralLinkageHeatmap extends React.PureComponent {
     const width = cbarX + CBAR_W + CBAR_LABELS;
     const height = TOP + grid + BOTTOM;
     const range = vmax - vmin || 1;
+
+    // Hovering a cell highlights its row + column categories in the UMAP/tree,
+    // reusing the point-dilation mechanism (like a left-sidebar category hover,
+    // but two categories at once).
+    const hoverCell = (rowLabel, colLabel) =>
+      dispatch({
+        type: "category values mouse hover start",
+        metadataField: groupby,
+        labels: rowLabel === colLabel ? [rowLabel] : [rowLabel, colLabel],
+      });
 
     const cells = [];
     for (let i = 0; i < n; i += 1) {
@@ -47,15 +57,19 @@ class AncestralLinkageHeatmap extends React.PureComponent {
           v === null || v === undefined
             ? MISSING
             : rampColor((v - vmin) / range);
+        const rowLabel = labels[i];
+        const colLabel = labels[j];
         cells.push(
           <rect
-            key={`c-${labels[i]}-${labels[j]}`}
+            key={`c-${rowLabel}-${colLabel}`}
             x={LEFT + j * CELL}
             y={TOP + i * CELL}
             width={CELL}
             height={CELL}
             fill={fill}
             shapeRendering="crispEdges"
+            style={{ cursor: "pointer" }}
+            onMouseEnter={() => hoverCell(rowLabel, colLabel)}
           />
         );
       }
@@ -131,7 +145,14 @@ class AncestralLinkageHeatmap extends React.PureComponent {
     ));
 
     return (
-      <svg width={width} height={height} style={{ display: "block" }}>
+      <svg
+        width={width}
+        height={height}
+        style={{ display: "block" }}
+        onMouseLeave={() =>
+          dispatch({ type: "category values mouse hover end" })
+        }
+      >
         {cells}
         {rowLabels}
         {colLabels}
