@@ -172,6 +172,34 @@ class TreedataAdaptorAncestralLinkageTest(unittest.TestCase):
         with self.assertRaises(Exception):
             self.data.ancestral_linkage_selected([], meta_trees(self.data), "time")
 
+    def test_selected_subset_prunes_to_view(self):
+        # Under an active subset (keep_obs = one tree's cells), the trees are pruned
+        # to that view: cells outside it are null, and the kept cells' scores match
+        # the full computation (target linkage is within-tree).
+        import numpy as np
+
+        trees = meta_trees(self.data)
+        obs_index = self.data.get_obs_index()
+        tree = self.data.data.obst["E7.5-R1-C1"]
+        t1_names = [n for n in tree.nodes if tree.out_degree(n) == 0]
+        t1_pos = sorted(int(obs_index.get_loc(n)) for n in t1_names)
+        target = t1_pos[:20]
+
+        np.random.seed(3)
+        full = self.data.ancestral_linkage_selected(target, trees, "time")["values"]
+        np.random.seed(3)
+        sub = self.data.ancestral_linkage_selected(target, trees, "time", keep_obs=t1_pos)["values"]
+
+        t1_set = set(t1_pos)
+        # cells outside the kept tree are null in the subset result
+        self.assertTrue(all(sub[p] is None for p in range(len(obs_index)) if p not in t1_set))
+        # kept cells' scores match the full computation
+        for p in t1_pos:
+            if full[p] is None:
+                self.assertIsNone(sub[p])
+            else:
+                self.assertAlmostEqual(full[p], sub[p], places=6)
+
     def test_pairwise_matrix_square_and_no_mutation(self):
         before = self._snapshot()
         trees = meta_trees(self.data)

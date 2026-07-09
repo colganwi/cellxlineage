@@ -1,8 +1,7 @@
 import importlib.metadata
 import struct
-import uuid
 import weakref
-from collections import OrderedDict, deque
+from collections import OrderedDict, defaultdict, deque
 
 import networkx as nx
 import numpy as np
@@ -69,6 +68,15 @@ class TreedataAdaptor(AnndataAdaptor):
         # Per-tree record of which depth keys have been annotated (see
         # _ensure_depth), so topological "depth" isn't recomputed every request.
         self._depth_ensured = weakref.WeakKeyDictionary()
+
+        # Induced-subtree cache for a subset, keyed by (tree selection, depth key,
+        # keepObs signature). The prune is done once per subset and reused by every
+        # ancestral-linkage call on that subset (target + pairwise). Small LRU.
+        self._prune_cache = OrderedDict()
+        self._PRUNE_CACHE_MAX = 4
+        # obs name -> set of tree keys it is a leaf of (built once, for grouping the
+        # kept leaves by tree without scanning every tree's nodes per request).
+        self._obs_tree_keys_cache = None
 
     # ------------------------------------------------------------------ #
     # Lineage tree support                                               #
@@ -469,11 +477,12 @@ class TreedataAdaptor(AnndataAdaptor):
     # Ancestral linkage (pycea.tl.ancestral_linkage, metric="path")      #
     # ------------------------------------------------------------------ #
     # The compute is vendored under server/common/compute/ancestral_linkage
-    # (a trimmed copy of pycea's compute chain — no matplotlib/scanpy). Both
-    # entry points build a lightweight, X-free TreeData indexed by the ORIGINAL
-    # obs names (self.data.obs was re-indexed to a RangeIndex by
-    # _alias_annotation_names, so it no longer matches the tree leaf names) that
-    # shares the existing tree graphs. self.data itself is never mutated.
+    # (a trimmed copy of pycea's compute chain — no matplotlib/scanpy) and runs
+    # directly on the networkx trees plus a leaf-name → category mapping, so no
+    # TreeData is constructed. Full trees are passed by reference (no copy, no
+    # extra memory); a subset is the induced subtree of the selected leaves (a
+    # small copy). self.data.obs is never touched; the tree graphs only gain a
+    # cached "depth" attribute.
 
     def _ensure_depth(self, tree, depth_key):
         """Guarantee every node carries `depth_key`. For "depth" (topological
@@ -490,30 +499,84 @@ class TreedataAdaptor(AnndataAdaptor):
         nx.set_node_attributes(tree, depths, "depth")
         done.add(depth_key)
 
-    def _build_linkage_tdata(self, groupby, series, tree_names, depth_key):
-        """Lightweight TreeData for the linkage compute.
+    def _obs_tree_keys(self):
+        """obs name -> set of tree keys it is a leaf of (built once, cached).
 
-        `series` holds the groupby values in full obs order (the adaptor's obs
-        row order). Returns (tdata, tree_keys); `tdata` is indexed by the
-        original obs names and shares the selected tree graphs.
+        Lets a subset's kept leaves be grouped by tree in O(subset) without
+        scanning every tree's nodes on each request.
         """
-        trees = self._select_trees(tree_names)
-        if len(trees) > 1 and bool(getattr(self.data, "has_overlap", False)):
+        if self._obs_tree_keys_cache is None:
+            mapping = defaultdict(set)
+            for key, tree in self.data.obst.items():
+                for node, deg in tree.out_degree():
+                    if deg == 0:
+                        mapping[node].add(key)
+            self._obs_tree_keys_cache = mapping
+        return self._obs_tree_keys_cache
+
+    @staticmethod
+    def _induced_subtree(tree, keep_leaves):
+        """Induced subtree of `keep_leaves` (leaves of `tree`) + their ancestors,
+        built from the leaves upward — O(subtree size), not O(tree size). Mirrors
+        treedata.subset_tree for alignment="leaves"."""
+        keep = set(keep_leaves)
+        pred = tree._pred
+        queue = deque(keep_leaves)
+        while queue:
+            node = queue.popleft()
+            for parent in pred[node]:
+                if parent not in keep:
+                    keep.add(parent)
+                    queue.append(parent)
+        return tree.subgraph(keep).copy()
+
+    def _linkage_trees(self, tree_names, depth_key, keep_obs=None):
+        """Return {tree name: nx.DiGraph} for the linkage compute, depth-annotated.
+
+        With `keep_obs=None` the selected trees are returned by reference (no copy).
+        Otherwise (an active subset) each touched tree is reduced to the induced
+        subtree of the kept leaves. The pruned trees are cached by the subset
+        signature so the prune happens once per subset and is reused by every
+        linkage call on it (target + pairwise), not repeated per click.
+        """
+        selected = self._select_trees(tree_names)
+        if len(selected) > 1 and bool(getattr(self.data, "has_overlap", False)):
             raise DatasetAccessError(
                 "Cannot compute linkage across multiple trees when trees share observations; select one tree."
             )
-        for tree in trees.values():
-            self._ensure_depth(tree, depth_key)
-        obs_index = self.get_obs_index()
-        obs = pd.DataFrame(index=obs_index)
-        obs[groupby] = pd.Series(np.asarray(series), index=obs_index)
-        tdata = td.TreeData(
-            obs=obs,
-            obst=dict(trees),
-            alignment=getattr(self.data, "alignment", "leaves"),
-            allow_overlap=bool(getattr(self.data, "allow_overlap", True)),
-        )
-        return tdata, list(trees.keys())
+        if keep_obs is None or len(keep_obs) == 0:
+            trees = {}
+            for name, tree in selected.items():
+                self._ensure_depth(tree, depth_key)
+                trees[name] = tree
+            return trees
+
+        positions = np.asarray(keep_obs, dtype=np.int64)
+        cache_key = (tuple(selected.keys()), depth_key, len(positions), hash(np.sort(positions).tobytes()))
+        cached = self._prune_cache.get(cache_key)
+        if cached is not None:
+            self._prune_cache.move_to_end(cache_key)
+            return cached
+
+        keep_names = set(self._selected_names(positions))
+        obs_tree_keys = self._obs_tree_keys()
+        leaves_by_tree = defaultdict(list)
+        for name in keep_names:
+            for key in obs_tree_keys.get(name, ()):
+                if key in selected:
+                    leaves_by_tree[key].append(name)
+
+        trees = {}
+        for key, leaves in leaves_by_tree.items():
+            graph = self._induced_subtree(selected[key], leaves)
+            self._ensure_depth(graph, depth_key)
+            trees[key] = graph
+
+        self._prune_cache[cache_key] = trees
+        self._prune_cache.move_to_end(cache_key)
+        while len(self._prune_cache) > self._PRUNE_CACHE_MAX:
+            self._prune_cache.popitem(last=False)
+        return trees
 
     def _selected_names(self, selected):
         """Map selected obs row positions (full obs index, as the client sends
@@ -524,11 +587,15 @@ class TreedataAdaptor(AnndataAdaptor):
             raise DatasetAccessError("Selected obs positions are out of range.")
         return obs_index[positions]
 
-    def ancestral_linkage_selected(self, selected, tree_names=None, depth_key="depth"):
+    def ancestral_linkage_selected(self, selected, tree_names=None, depth_key="depth", keep_obs=None):
         """Target-mode linkage: per-cell tree distance (path) to the nearest
         selected cell. Returns {"values": [...]} in full obs order (NaN -> None),
-        suitable for a new continuous obs column on the client."""
-        from server.common.compute.ancestral_linkage import ancestral_linkage
+        suitable for a new continuous obs column on the client.
+
+        `keep_obs` (when a subset is active) is the view's obs row positions; the
+        trees are pruned to that subset (shared/cached with the pairwise call and
+        the tree-view subset) so the compute runs only over the visible cells."""
+        from server.common.compute.ancestral_linkage import linkage_selected_scores
 
         depth_key = depth_key or "depth"
         names = self._selected_names(selected)
@@ -537,22 +604,22 @@ class TreedataAdaptor(AnndataAdaptor):
 
         obs_index = self.get_obs_index()
         is_selected = obs_index.isin(set(names))
-        series = np.where(is_selected, "selected", "other")
-        tdata, tree_keys = self._build_linkage_tdata("_cxl_group", series, tree_names, depth_key)
+        name_to_cat = dict(zip(obs_index, np.where(is_selected, "selected", "other")))
+        trees = self._linkage_trees(tree_names, depth_key, keep_obs=keep_obs)
 
-        ancestral_linkage(
-            tdata,
-            groupby="_cxl_group",
-            target="selected",
-            metric="path",
-            depth_key=depth_key,
-            tree=tree_keys,
-            normalize=True,
-        )
+        scores = linkage_selected_scores(trees, name_to_cat, "selected", depth_key, metric="path")
+
+        # Scatter the per-leaf scores into full obs order.
+        values = np.full(len(obs_index), np.nan)
+        if scores:
+            leaves = list(scores.keys())
+            positions = obs_index.get_indexer(leaves)
+            values[positions] = [scores[leaf] for leaf in leaves]
+
         # Negate so that closely-related cells (small normalized distance) become
         # high values — colored red (hot). The selected target cells themselves are
         # pinned to the maximum so they read as the hottest of all.
-        values = -tdata.obs["selected_linkage"].to_numpy(dtype=float)
+        values = -values
         finite = values[np.isfinite(values)]
         if finite.size:
             values[np.asarray(is_selected) & np.isfinite(values)] = float(np.max(finite))
@@ -560,10 +627,10 @@ class TreedataAdaptor(AnndataAdaptor):
 
     def ancestral_linkage_pairwise(self, groupby, selected=None, tree_names=None, depth_key="depth"):
         """Pairwise-mode linkage over a categorical obs column, optionally
-        restricted to the selected cells (which auto-prunes the trees). Returns
-        the clustered, symmetrized normalized-enrichment matrix as
+        restricted to the selected cells (which prunes the trees to their induced
+        subtree). Returns the clustered, symmetrized normalized-enrichment matrix as
         {"labels": [...], "matrix": [[...]], "vmin": v, "vmax": v}."""
-        from server.common.compute.ancestral_linkage import ancestral_linkage, cluster_order
+        from server.common.compute.ancestral_linkage import cluster_order, linkage_pairwise_matrix
 
         depth_key = depth_key or "depth"
         if groupby not in self.data.obs.columns:
@@ -572,25 +639,22 @@ class TreedataAdaptor(AnndataAdaptor):
         if not (isinstance(col.dtype, pd.CategoricalDtype) or col.dtype.kind in ("O", "b")):
             raise ValueError(f"'{groupby}' is not a categorical column; pick a categorical color-by.")
 
-        tdata, tree_keys = self._build_linkage_tdata(groupby, col.to_numpy(), tree_names, depth_key)
-        if selected is not None and len(selected) > 0:
-            names = self._selected_names(selected)
-            tdata = tdata[list(names)]
+        obs_index = self.get_obs_index()
+        name_to_cat = dict(zip(obs_index, col.to_numpy()))
+        keep_obs = selected if (selected is not None and len(selected) > 0) else None
+        trees = self._linkage_trees(tree_names, depth_key, keep_obs=keep_obs)
 
-        ancestral_linkage(
-            tdata,
-            groupby=groupby,
+        matrix = linkage_pairwise_matrix(
+            trees,
+            name_to_cat,
+            depth_key,
             metric="path",
-            normalize=True,
             symmetrize="mean",
-            depth_key=depth_key,
-            tree=tree_keys,
             # Only include categories with at least this many cells; smaller
             # groups give noisy linkage estimates.
             min_size=self._LINKAGE_MIN_SIZE,
         )
-        matrix = tdata.uns[f"{groupby}_linkage"]
-        if matrix.shape[0] < 2:
+        if matrix is None or matrix.shape[0] < 2:
             raise ValueError(
                 f"Need at least two categories with ≥{self._LINKAGE_MIN_SIZE} cells to compute pairwise linkage."
             )

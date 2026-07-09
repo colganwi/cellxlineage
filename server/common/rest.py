@@ -355,8 +355,9 @@ def ancestral_linkage_selected_post(request, data_adaptor):
     selected = body.get("selected", [])
     tree_names = body.get("tree", None)
     depth_key = body.get("depthKey", "depth")
+    keep_obs = body.get("keepObs", None)
     try:
-        result = data_adaptor.ancestral_linkage_selected(selected, tree_names, depth_key)
+        result = data_adaptor.ancestral_linkage_selected(selected, tree_names, depth_key, keep_obs=keep_obs)
         return make_response(jsonify(result), HTTPStatus.OK, {"Content-Type": "application/json"})
     except (KeyError, ValueError, DatasetAccessError) as e:
         return abort_and_log(HTTPStatus.BAD_REQUEST, str(e), include_exc_info=True)
