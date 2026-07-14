@@ -2,6 +2,7 @@ import os
 from os.path import splitext, isdir
 
 from server.common.annotations.local_file_csv import AnnotationsLocalFile
+from server.common.annotations.in_memory import AnnotationsInMemory
 from server.common.config.base_config import BaseConfig
 from server.common.errors import ConfigurationError, AnnotationsError
 from server.common.utils.data_locator import DataLocator
@@ -103,8 +104,10 @@ class DatasetConfig(BaseConfig):
         # as are writable gene sets
         if self.user_annotations__type == "local_file_csv":
             self.handle_local_file_csv_annotations(context)
+        elif self.user_annotations__type == "in_memory":
+            self.handle_in_memory_annotations(context)
         else:
-            raise ConfigurationError('The only annotation type support is "local_file_csv"')
+            raise ConfigurationError('Annotation type must be "local_file_csv" or "in_memory"')
 
         self.check_annotation_config_vars_not_set(context)
 
@@ -156,6 +159,33 @@ class DatasetConfig(BaseConfig):
                     self.user_annotations.read_gene_sets(data_adaptor, context)
                 except (ValueError, AnnotationsError, KeyError) as e:
                     raise ConfigurationError(f"Unable to read genesets CSV file: {str(e)}") from e
+
+    def handle_in_memory_annotations(self, context):
+        """Ephemeral, per-session annotations for multi-user hosting. No disk
+        output, so the file/dir options are incompatible; --backed is also
+        rejected (a shared h5py handle is unsafe under the threaded server)."""
+        if (
+            self.user_annotations__local_file_csv__file is not None
+            or self.user_annotations__local_file_csv__directory is not None
+            or self.user_annotations__local_file_csv__gene_sets_file is not None
+        ):
+            raise ConfigurationError(
+                "In-memory (ephemeral) annotations are incompatible with "
+                "--annotations-file, --user-generated-data-dir, and --gene-sets-file."
+            )
+
+        if self.app_config.server_config.adaptor__anndata_adaptor__backed:
+            raise ConfigurationError(
+                "In-memory (ephemeral) annotations are incompatible with --backed "
+                "(concurrent reads on a shared file handle are unsafe under the "
+                "multi-threaded server)."
+            )
+
+        anno_config = {
+            "user-annotations": self.user_annotations__enable,
+            "genesets-save": not self.user_annotations__gene_sets__readonly,
+        }
+        self.user_annotations = AnnotationsInMemory(anno_config)
 
     def check_annotation_config_vars_not_set(self, context):
         if self.user_annotations__type is not None:
