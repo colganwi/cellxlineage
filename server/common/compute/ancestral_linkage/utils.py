@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import random
+import threading
 import weakref
 
 import networkx as nx
@@ -18,16 +19,22 @@ import networkx as nx
 # *structure* is mutated in place these caches must be cleared (see clear_tree_caches).
 _LEAVES_CACHE: "weakref.WeakKeyDictionary" = weakref.WeakKeyDictionary()
 _TOPO_CACHE: "weakref.WeakKeyDictionary" = weakref.WeakKeyDictionary()
+# One shared adaptor serves every request under the threaded server, so these
+# module-level caches are shared across threads. Guard the (rare) writes and the
+# clear so a concurrent insert/weakref-cleanup can't corrupt the dict; the reads
+# and the pure compute stay outside the lock so threads don't serialize.
+_CACHE_LOCK = threading.Lock()
 
 
 def clear_tree_caches(tree: nx.DiGraph | None = None) -> None:
     """Invalidate the structure-only caches for one tree, or all trees."""
-    if tree is None:
-        _LEAVES_CACHE.clear()
-        _TOPO_CACHE.clear()
-    else:
-        _LEAVES_CACHE.pop(tree, None)
-        _TOPO_CACHE.pop(tree, None)
+    with _CACHE_LOCK:
+        if tree is None:
+            _LEAVES_CACHE.clear()
+            _TOPO_CACHE.clear()
+        else:
+            _LEAVES_CACHE.pop(tree, None)
+            _TOPO_CACHE.pop(tree, None)
 
 
 def get_topological_order(tree: nx.DiGraph) -> list:
@@ -35,7 +42,8 @@ def get_topological_order(tree: nx.DiGraph) -> list:
     order = _TOPO_CACHE.get(tree)
     if order is None:
         order = list(nx.topological_sort(tree))
-        _TOPO_CACHE[tree] = order
+        with _CACHE_LOCK:
+            _TOPO_CACHE[tree] = order
     return order
 
 
@@ -56,7 +64,8 @@ def get_leaves(tree: nx.DiGraph):
     leaves = _LEAVES_CACHE.get(tree)
     if leaves is None:
         leaves = [node for node in nx.dfs_postorder_nodes(tree, get_root(tree)) if tree.out_degree(node) == 0]
-        _LEAVES_CACHE[tree] = leaves
+        with _CACHE_LOCK:
+            _LEAVES_CACHE[tree] = leaves
     return leaves
 
 

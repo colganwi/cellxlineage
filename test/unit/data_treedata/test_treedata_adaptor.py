@@ -296,9 +296,73 @@ class TreedataAdaptorAncestralLinkageTest(unittest.TestCase):
         with self.assertRaises(Exception):
             self.data.ancestral_linkage_pairwise("total_counts", None, meta_trees(self.data), "time")
 
+    def test_pairwise_over_user_annotation(self):
+        # A category the user created in the browser lives in the (per-session)
+        # user-annotation store, not self.data.obs. Pairwise linkage must resolve
+        # it there instead of failing with "not an obs column".
+        from flask import Flask, session
+
+        from server.app.session import CXGUID
+        from server.common.annotations.in_memory import AnnotationsInMemory
+
+        anno = AnnotationsInMemory({"user-annotations": True, "genesets-save": True})
+        self.data.dataset_config.user_annotations = anno
+
+        obs_index = self.data.get_obs_index()
+        n = obs_index.shape[0]
+        cats = np.array(["G1"] * n, dtype=object)
+        cats[n // 2 :] = "G2"  # two groups, each well above the min_size cutoff
+        user_df = pd.DataFrame({"user_cat": pd.Categorical(cats)}, index=obs_index)
+
+        app = Flask(__name__)
+        app.config["SECRET_KEY"] = "test"
+        with app.test_request_context():
+            session[CXGUID] = "userA"
+            anno.write_labels(user_df, self.data)
+            result = self.data.ancestral_linkage_pairwise("user_cat", None, meta_trees(self.data), "time")
+
+        self.assertEqual(set(result["labels"]), {"G1", "G2"})
+        self.assertEqual(len(result["matrix"]), len(result["labels"]))
+
 
 def meta_trees(adaptor):
     return adaptor.get_lineage_default_trees()
+
+
+class EphemeralAnnotationsConfigTest(unittest.TestCase):
+    """--ephemeral-annotations selects the in-memory backend and refuses the
+    disk/backed options that don't make sense for it."""
+
+    def _config(self, backed=False, anno_type="in_memory", **anno_kwargs):
+        config = AppConfig()
+        config.update_server_config(
+            single_dataset__datapath=DataLocator(EXAMPLE).path,
+            app__flask_secret_key="secret",
+            adaptor__anndata_adaptor__backed=backed,
+        )
+        config.update_dataset_config(user_annotations__type=anno_type, **anno_kwargs)
+        return config
+
+    def test_in_memory_selects_in_memory_backend(self):
+        from server.common.annotations.in_memory import AnnotationsInMemory
+
+        config = self._config()
+        config.complete_config()
+        self.assertIsInstance(config.dataset_config.user_annotations, AnnotationsInMemory)
+
+    def test_in_memory_rejects_backed(self):
+        from server.common.errors import ConfigurationError
+
+        config = self._config(backed=True)
+        with self.assertRaises(ConfigurationError):
+            config.complete_config()
+
+    def test_in_memory_rejects_annotations_file(self):
+        from server.common.errors import ConfigurationError
+
+        config = self._config(user_annotations__local_file_csv__file="labels.csv")
+        with self.assertRaises(ConfigurationError):
+            config.complete_config()
 
 
 if __name__ == "__main__":

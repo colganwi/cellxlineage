@@ -7,6 +7,7 @@ from flask import (
     current_app,
     make_response,
     render_template,
+    session,
     Blueprint,
     request,
     send_from_directory,
@@ -14,6 +15,7 @@ from flask import (
 from flask_restful import Api, Resource
 
 import server.common.rest as common_rest
+from server.app.session import reset_user_session
 from server.common.errors import DatasetAccessError, RequestException
 from server.common.health import health_check
 from server.common.utils.utils import StrictJSONEncoder
@@ -62,6 +64,13 @@ def dataset_index():
     app_config = current_app.app_config
 
     dataset_config = app_config.get_dataset_config()
+
+    # In ephemeral (in-memory) annotations mode, rotate the session id on each
+    # page (re)load so a reload starts with a fresh, empty annotation store and
+    # nothing carries over between loads or between users.
+    if dataset_config.user_annotations__type == "in_memory":
+        reset_user_session(session)
+
     scripts = dataset_config.app__scripts
     inline_scripts = dataset_config.app__inline_scripts
 

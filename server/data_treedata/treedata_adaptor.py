@@ -1,6 +1,6 @@
 import importlib.metadata
 import struct
-import weakref
+import threading
 from collections import OrderedDict, defaultdict, deque
 
 import networkx as nx
@@ -62,12 +62,24 @@ class TreedataAdaptor(AnndataAdaptor):
         for key in non_array_keys:
             del self.data.obsm[key]
 
+        # A single adaptor instance serves every request (the threaded server
+        # shares it across users), so the lineage caches below are shared mutable
+        # state. This lock guards their bookkeeping (get / move_to_end / insert /
+        # evict); the heavy layout/prune compute runs outside it so users don't
+        # serialize on it.
+        self._lineage_lock = threading.RLock()
+
+        # Pre-compute the topological "depth" node attribute on every tree once,
+        # here at load time (single-threaded), so no request ever mutates a shared
+        # tree via _ensure_depth. Matches _topology_depths / pycea.pp.add_depth:
+        # a stored "depth" on every node is used as-is; otherwise it is computed
+        # as hops from the root. Induced-subtree copies inherit these values (the
+        # prune keeps all ancestors, so root->leaf hop counts are preserved).
+        for tree in self.data.obst.values():
+            self._ensure_depth(tree, "depth")
+
         # LRU cache of framed FBS for full-tree (no-subset) layouts.
         self._lineage_layout_cache = OrderedDict()
-
-        # Per-tree record of which depth keys have been annotated (see
-        # _ensure_depth), so topological "depth" isn't recomputed every request.
-        self._depth_ensured = weakref.WeakKeyDictionary()
 
         # Induced-subtree cache for a subset, keyed by (tree selection, depth key,
         # keepObs signature). The prune is done once per subset and reused by every
@@ -336,10 +348,11 @@ class TreedataAdaptor(AnndataAdaptor):
         cache_key = None
         if keep_obs is None:
             cache_key = (tuple(trees.keys()), depth_key)
-            cached = self._lineage_layout_cache.get(cache_key)
-            if cached is not None:
-                self._lineage_layout_cache.move_to_end(cache_key)
-                return cached
+            with self._lineage_lock:
+                cached = self._lineage_layout_cache.get(cache_key)
+                if cached is not None:
+                    self._lineage_layout_cache.move_to_end(cache_key)
+                    return cached
 
         # Map node/leaf names → obs row position (leaf names match obs index).
         obs_index = self.get_obs_index()
@@ -467,10 +480,11 @@ class TreedataAdaptor(AnndataAdaptor):
 
         result = self._frame_matrices(matrices)
         if cache_key is not None:
-            self._lineage_layout_cache[cache_key] = result
-            self._lineage_layout_cache.move_to_end(cache_key)
-            while len(self._lineage_layout_cache) > self._LINEAGE_CACHE_MAX:
-                self._lineage_layout_cache.popitem(last=False)
+            with self._lineage_lock:
+                self._lineage_layout_cache[cache_key] = result
+                self._lineage_layout_cache.move_to_end(cache_key)
+                while len(self._lineage_layout_cache) > self._LINEAGE_CACHE_MAX:
+                    self._lineage_layout_cache.popitem(last=False)
         return result
 
     # ------------------------------------------------------------------ #
@@ -486,18 +500,24 @@ class TreedataAdaptor(AnndataAdaptor):
 
     def _ensure_depth(self, tree, depth_key):
         """Guarantee every node carries `depth_key`. For "depth" (topological
-        depth from the root, hops) it is computed and set in place once per tree,
-        matching the layout's own definition and pycea.pp.add_depth. Other keys are
-        assumed stored on all nodes (validated downstream by check_tree_has_key)."""
+        depth from the root, in hops) it is computed and stored in place when not
+        already present on every node, matching _topology_depths and
+        pycea.pp.add_depth. This runs once per tree at load time (see
+        _load_data), so it never mutates a shared tree during a request; the
+        induced-subtree copies built for a subset inherit the stored values (the
+        prune keeps every ancestor, so root->leaf hop counts are preserved).
+        Other keys are assumed stored on all nodes (validated downstream by
+        check_tree_has_key)."""
         if depth_key != "depth":
             return
-        done = self._depth_ensured.setdefault(tree, set())
-        if depth_key in done:
+        node_attrs = tree._node
+        if node_attrs and all("depth" in attrs for attrs in node_attrs.values()):
             return
         root = self._tree_root(tree)
+        if root is None:
+            return
         depths = nx.single_source_shortest_path_length(tree, root)
         nx.set_node_attributes(tree, depths, "depth")
-        done.add(depth_key)
 
     def _obs_tree_keys(self):
         """obs name -> set of tree keys it is a leaf of (built once, cached).
@@ -505,14 +525,15 @@ class TreedataAdaptor(AnndataAdaptor):
         Lets a subset's kept leaves be grouped by tree in O(subset) without
         scanning every tree's nodes on each request.
         """
-        if self._obs_tree_keys_cache is None:
-            mapping = defaultdict(set)
-            for key, tree in self.data.obst.items():
-                for node, deg in tree.out_degree():
-                    if deg == 0:
-                        mapping[node].add(key)
-            self._obs_tree_keys_cache = mapping
-        return self._obs_tree_keys_cache
+        with self._lineage_lock:
+            if self._obs_tree_keys_cache is None:
+                mapping = defaultdict(set)
+                for key, tree in self.data.obst.items():
+                    for node, deg in tree.out_degree():
+                        if deg == 0:
+                            mapping[node].add(key)
+                self._obs_tree_keys_cache = mapping
+            return self._obs_tree_keys_cache
 
     @staticmethod
     def _induced_subtree(tree, keep_leaves):
@@ -553,10 +574,11 @@ class TreedataAdaptor(AnndataAdaptor):
 
         positions = np.asarray(keep_obs, dtype=np.int64)
         cache_key = (tuple(selected.keys()), depth_key, len(positions), hash(np.sort(positions).tobytes()))
-        cached = self._prune_cache.get(cache_key)
-        if cached is not None:
-            self._prune_cache.move_to_end(cache_key)
-            return cached
+        with self._lineage_lock:
+            cached = self._prune_cache.get(cache_key)
+            if cached is not None:
+                self._prune_cache.move_to_end(cache_key)
+                return cached
 
         keep_names = set(self._selected_names(positions))
         obs_tree_keys = self._obs_tree_keys()
@@ -572,10 +594,11 @@ class TreedataAdaptor(AnndataAdaptor):
             self._ensure_depth(graph, depth_key)
             trees[key] = graph
 
-        self._prune_cache[cache_key] = trees
-        self._prune_cache.move_to_end(cache_key)
-        while len(self._prune_cache) > self._PRUNE_CACHE_MAX:
-            self._prune_cache.popitem(last=False)
+        with self._lineage_lock:
+            self._prune_cache[cache_key] = trees
+            self._prune_cache.move_to_end(cache_key)
+            while len(self._prune_cache) > self._PRUNE_CACHE_MAX:
+                self._prune_cache.popitem(last=False)
         return trees
 
     def _selected_names(self, selected):
@@ -625,6 +648,25 @@ class TreedataAdaptor(AnndataAdaptor):
             values[np.asarray(is_selected) & np.isfinite(values)] = float(np.max(finite))
         return {"values": [None if not np.isfinite(v) else float(v) for v in values]}
 
+    def _groupby_column(self, groupby, obs_index):
+        """Resolve a color-by column to a pandas Series in obs order. Looks first
+        in the dataset's obs, then in the current session's user annotations
+        (categories the user created in the browser live there, not in
+        self.data.obs — otherwise pairwise linkage over a user-defined category
+        would fail with "not an obs column")."""
+        if groupby in self.data.obs.columns:
+            return self.data.obs[groupby]
+
+        annotations = getattr(self.dataset_config, "user_annotations", None)
+        if annotations is not None and annotations.user_annotations_enabled():
+            labels = annotations.read_labels(self)
+            if labels is not None and not labels.empty and groupby in labels.columns:
+                # read_labels is indexed by obs names (check_new_labels sets the
+                # index to get_obs_index()); reindex to guarantee obs order.
+                return labels[groupby].reindex(obs_index)
+
+        raise ValueError(f"'{groupby}' is not an obs column or a user annotation.")
+
     def ancestral_linkage_pairwise(self, groupby, selected=None, tree_names=None, depth_key="depth"):
         """Pairwise-mode linkage over a categorical obs column, optionally
         restricted to the selected cells (which prunes the trees to their induced
@@ -633,13 +675,14 @@ class TreedataAdaptor(AnndataAdaptor):
         from server.common.compute.ancestral_linkage import cluster_order, linkage_pairwise_matrix
 
         depth_key = depth_key or "depth"
-        if groupby not in self.data.obs.columns:
-            raise ValueError(f"'{groupby}' is not an obs column.")
-        col = self.data.obs[groupby]
+        obs_index = self.get_obs_index()
+        col = self._groupby_column(groupby, obs_index)
         if not (isinstance(col.dtype, pd.CategoricalDtype) or col.dtype.kind in ("O", "b")):
             raise ValueError(f"'{groupby}' is not a categorical column; pick a categorical color-by.")
 
-        obs_index = self.get_obs_index()
+        # col is aligned to obs order (both self.data.obs and the user-annotation
+        # labels are stored one row per obs, in obs order), so a positional zip
+        # with obs_index yields {leaf name: category}.
         name_to_cat = dict(zip(obs_index, col.to_numpy()))
         keep_obs = selected if (selected is not None and len(selected) > 0) else None
         trees = self._linkage_trees(tree_names, depth_key, keep_obs=keep_obs)

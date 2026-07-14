@@ -61,6 +61,16 @@ def annotation_args(func):
         help="CSV file to initialize editing of gene sets; will be altered in-place. Incompatible with "
         "--user-generated-data-dir.",
     )
+    @click.option(
+        "--ephemeral-annotations",
+        is_flag=True,
+        default=False,
+        show_default=True,
+        help="Keep user annotations and gene sets in memory, per browser session, instead of on disk. "
+        "Recommended for multi-user hosting: no 'user generated data directory' prompt, annotations reset "
+        "on page reload, and each user is isolated. Incompatible with --annotations-file, "
+        "--user-generated-data-dir, --gene-sets-file, and --backed.",
+    )
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
         return func(*args, **kwargs)
@@ -257,8 +267,7 @@ def launch_args(func):
 
 def handle_scripts(scripts):
     if scripts:
-        click.echo(
-            r"""
+        click.echo(r"""
     / / /\ \ \__ _ _ __ _ __ (_)_ __   __ _
     \ \/  \/ / _` | '__| '_ \| | '_ \ / _` |
      \  /\  / (_| | |  | | | | | | | | (_| |
@@ -266,8 +275,7 @@ def handle_scripts(scripts):
                                       |___/
     The --scripts flag is intended for developers to include google analytics etc. You could be opening yourself to a
     security risk by including the --scripts flag. Make sure you trust the scripts that you are including.
-            """
-        )
+            """)
         scripts_pretty = ", ".join(scripts)
         click.confirm(f"Are you sure you want to inject these scripts: {scripts_pretty}?", abort=True)
 
@@ -322,6 +330,7 @@ def launch(
     user_generated_data_dir,
     gene_sets_file,
     disable_gene_sets_save,
+    ephemeral_annotations,
     backed,
     disable_diffexp,
     config_file,
@@ -376,6 +385,9 @@ def launch(
         cli_config.update_dataset_config(
             app__scripts=scripts,
             user_annotations__enable=not disable_annotations,
+            user_annotations__type=(
+                "in_memory" if ephemeral_annotations else DEFAULT_CONFIG.dataset_config.user_annotations__type
+            ),
             user_annotations__local_file_csv__file=annotations_file,
             user_annotations__local_file_csv__directory=user_generated_data_dir,
             user_annotations__local_file_csv__gene_sets_file=gene_sets_file,
