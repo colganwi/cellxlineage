@@ -2,7 +2,7 @@ import logging
 import sys
 from server.common.utils.utils import import_plugins
 
-__version__ = "0.3.0"
+__version__ = "0.3.1"
 display_version = "cellxlineage v" + __version__
 
 try:

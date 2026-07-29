@@ -14,7 +14,7 @@ with open("server/requirements-annotate.txt") as fh:
 
 setup(
     name="cellxlineage",
-    version="0.3.0",
+    version="0.3.1",
     packages=find_packages(),
     url="https://github.com/colganwi/cellxlineage",
     license="MIT",
